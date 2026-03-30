@@ -1,0 +1,61 @@
+{
+  "name": "<PACKAGE>",
+  "version": "1.0.0",
+  "description": "<DESCRIPTION>",
+  "keywords": [],
+  "license": "<LICENSE>",
+  "author": "<AUTHOR>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/<USERNAME>/<REPO>"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "prepublishOnly": "pnpm build",
+    "build": "tsdown",
+    "test": "vitest",
+    "lint": "oxlint --fix",
+    "lint:ci": "oxlint",
+    "format": "oxfmt --write",
+    "format:ci": "oxfmt --check",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.2",
+    "@total-typescript/tsconfig": "^1.0.4",
+    "@types/node": "^25.2.3",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
+    "oxfmt": "^0.30.0",
+    "oxlint": "^1.45.0",
+    "oxlint-tsgolint": "^0.11.5",
+    "pkg-pr-new": "^0.0.63",
+    "publint": "^0.3.17",
+    "tsdown": "^0.20.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  },
+  "lint-staged": {
+    "*.{js,ts,tsx,jsx}": [
+      "pnpm lint",
+      "pnpm format"
+    ],
+    "*.{json,jsonc}": [
+      "pnpm format"
+    ]
+  },
+  "packageManager": "pnpm@10.29.2"
+}
