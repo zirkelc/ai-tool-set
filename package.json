@@ -1,26 +1,27 @@
 {
-  "name": "<PACKAGE>",
+  "name": "ai-tool-set",
   "version": "1.0.0",
-  "description": "<DESCRIPTION>",
-  "keywords": [],
-  "license": "<LICENSE>",
-  "author": "<AUTHOR>",
+  "description": "AI SDK: Manage tool activation with type-safe, chainable tool sets",
+  "keywords": [
+    "ai",
+    "ai-sdk",
+    "tools",
+    "toolset"
+  ],
+  "license": "MIT",
+  "author": "Chris Cook",
   "repository": {
     "type": "git",
-    "url": "https://github.com/<USERNAME>/<REPO>"
+    "url": "https://github.com/zirkelc/ai-tool-set"
   },
   "files": [
     "dist"
   ],
   "type": "module",
-  "main": "dist/index.cjs",
-  "module": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "types": "dist/index.d.mts",
   "exports": {
-    ".": {
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.cjs"
-    }
+    ".": "./dist/index.mjs",
+    "./package.json": "./package.json"
   },
   "scripts": {
     "prepublishOnly": "pnpm build",
@@ -35,18 +36,23 @@
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.2",
     "@total-typescript/tsconfig": "^1.0.4",
-    "@types/node": "^25.2.3",
+    "@types/node": "^25.5.2",
+    "ai": "^6.0.153",
     "husky": "^9.1.7",
-    "lint-staged": "^16.2.7",
-    "oxfmt": "^0.30.0",
-    "oxlint": "^1.45.0",
-    "oxlint-tsgolint": "^0.11.5",
-    "pkg-pr-new": "^0.0.63",
-    "publint": "^0.3.17",
-    "tsdown": "^0.20.3",
+    "lint-staged": "^16.4.0",
+    "oxfmt": "^0.44.0",
+    "oxlint": "^1.59.0",
+    "oxlint-tsgolint": "^0.20.0",
+    "pkg-pr-new": "^0.0.66",
+    "publint": "^0.3.18",
+    "tsdown": "^0.21.7",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.18"
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.3",
+    "zod": "^4.3.6"
+  },
+  "peerDependencies": {
+    "ai": "^6.0.141"
   },
   "lint-staged": {
     "*.{js,ts,tsx,jsx}": [
