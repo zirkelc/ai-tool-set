@@ -2,7 +2,7 @@
 
 # ai-tool-set
 
-<p align="center">AI SDK: Manage tool activation with type-safe, chainable tool sets</p>
+<p align="center">Conditional tool activation for the AI SDK, fully type-safe</p>
 <p align="center">
   <a href="https://www.npmjs.com/package/ai-tool-set" alt="ai-tool-set"><img src="https://img.shields.io/npm/dt/ai-tool-set?label=ai-tool-set"></a> <a href="https://github.com/zirkelc/ai-tool-set/actions/workflows/ci.yml" alt="CI"><img src="https://img.shields.io/github/actions/workflow/status/zirkelc/ai-tool-set/ci.yml?branch=main"></a>
 </p>

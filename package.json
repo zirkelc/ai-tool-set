@@ -1,7 +1,7 @@
 {
   "name": "ai-tool-set",
   "version": "1.0.0",
-  "description": "AI SDK: Manage tool activation with type-safe, chainable tool sets",
+  "description": "Conditional tool activation for the AI SDK, fully type-safe",
   "keywords": [
     "ai",
     "ai-sdk",
