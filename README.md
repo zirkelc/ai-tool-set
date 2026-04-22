@@ -448,17 +448,19 @@ Parameter type that accepts both immutable and mutable variants of an existing t
 ```ts
 import { createToolSet, type ToolSet } from 'ai-tool-set';
 
-const baseToolSet = createToolSet({ tools }).deactivate(['cancel_order']);
+const toolSet = createToolSet({ tools }).deactivate(['cancel_order']);
 
-type MyToolSet = ToolSet<typeof baseToolSet>;
+type MyToolSet = ToolSet<typeof toolSet>;
 
-// Accepts the immutable baseToolSet AND the cloned mutable instance
-function activateAdminTools(toolSet: MyToolSet) {
+// Accepts the immutable toolset AND the cloned mutable instance
+function activateTools(toolSet: MyToolSet) {
   toolSet.activate(['cancel_order']);
 }
 
-activateAdminTools(baseToolSet);
-activateAdminTools(baseToolSet.clone({ mutable: true }));
+activateTools(toolSet);
+
+const mutableToolSet = toolSet.clone({ mutable: true });
+activateTools(mutableToolSet);
 ```
 
 ### `InferToolSet`

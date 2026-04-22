@@ -66,7 +66,7 @@ type ResolvedToolSet<TOOLS extends ToolRecord> = {
 };
 
 /** Union of both toolset classes for type utility constraints. */
-type AnyToolSet = ImmutableToolSet<any> | MutableToolSet<any>;
+type AnyToolSet = ImmutableToolSet<any, any, any> | MutableToolSet<any, any, any>;
 
 /**
  * Derive a parameter type that accepts both immutable and mutable variants of an existing tool set.

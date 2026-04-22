@@ -9,6 +9,7 @@ import {
   type InferInactiveTools,
   type InferToolSet,
   type InferUIToolSet,
+  type ToolSet,
 } from '../tool-set.js';
 import { TOOLS, type MyUIMessage, plainTool, calcTool, cancelTool, editTool, archiveTool } from './fixtures.js';
 
@@ -107,6 +108,65 @@ describe('exported types', () => {
     test('should return never for mutable toolset', () => {
       const toolSet = createToolSet({ tools: TOOLS, mutable: true });
       expectTypeOf<InferActiveTools<typeof toolSet>>().toEqualTypeOf<never>();
+    });
+  });
+
+  describe('ToolSet', () => {
+    test('should accept an immutable instance', () => {
+      const base = createToolSet({ tools: TOOLS }).deactivate(['plain']);
+      const fn = (_toolSet: ToolSet<typeof base>) => {};
+      fn(base);
+      fn(base.clone({ mutable: true }));
+    });
+
+    test('should accept a mutable instance', () => {
+      const base = createToolSet({ tools: TOOLS, mutable: true });
+      const fn = (_toolSet: ToolSet<typeof base>) => {};
+      fn(base);
+      fn(base.clone());
+    });
+
+    test('should preserve TOOLS inferred from immutable source', () => {
+      const base = createToolSet({ tools: TOOLS });
+      expectTypeOf<InferToolSet<ToolSet<typeof base>>>().toEqualTypeOf<typeof TOOLS>();
+    });
+
+    test('should preserve TOOLS inferred from mutable source', () => {
+      const base = createToolSet({ tools: TOOLS, mutable: true });
+      expectTypeOf<InferToolSet<ToolSet<typeof base>>>().toEqualTypeOf<typeof TOOLS>();
+    });
+
+    test('should reject unknown tool names on an immutable source helper', () => {
+      const base = createToolSet({ tools: TOOLS });
+      const fn = (toolSet: ToolSet<typeof base>) => {
+        toolSet.activate(['plain']);
+        // @ts-expect-error — 'unknown' is not in TOOLS
+        toolSet.activate(['unknown']);
+      };
+      fn(base);
+    });
+
+    test('should reject unknown tool names on a mutable source helper', () => {
+      const base = createToolSet({ tools: TOOLS, mutable: true });
+      const fn = (toolSet: ToolSet<typeof base>) => {
+        toolSet.activate(['plain']);
+        // @ts-expect-error — 'unknown' is not in TOOLS
+        toolSet.activate(['unknown']);
+      };
+      fn(base);
+    });
+
+    test('should preserve MESSAGE generic from immutable source', () => {
+      const base = createToolSet<typeof TOOLS, ModelMessage>({ tools: TOOLS });
+      type Input = Parameters<Extract<ToolSet<typeof base>, { activateWhen: (...args: any) => any }>['inferTools']>[0];
+      expectTypeOf<NonNullable<Input>['messages']>().toEqualTypeOf<Array<ModelMessage> | undefined>();
+    });
+
+    test('should preserve CONTEXT generic from immutable source', () => {
+      type MyCtx = { isAdmin: boolean };
+      const base = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS });
+      type Input = Parameters<Extract<ToolSet<typeof base>, { activateWhen: (...args: any) => any }>['inferTools']>[0];
+      expectTypeOf<NonNullable<Input>['context']>().toEqualTypeOf<MyCtx | undefined>();
     });
   });
 
