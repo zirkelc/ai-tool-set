@@ -10,31 +10,31 @@ type MessageType = UIMessage | ModelMessage;
 type InferUIMessage<TOOLS extends ToolRecord> = UIMessage<unknown, any, InferUIToolSet<TOOLS>>;
 
 /** Infer the raw tool record from a ToolRecord or ToolSet instance. */
-export type InferToolSet<T extends ToolRecord | AnyToolSet> =
-  T extends ImmutableToolSet<infer TOOLS, any, any>
+export type InferToolSet<TOOLSET extends ToolRecord | AnyToolSet> =
+  TOOLSET extends ImmutableToolSet<infer TOOLS, any, any>
     ? TOOLS
-    : T extends MutableToolSet<infer TOOLS, any, any>
+    : TOOLSET extends MutableToolSet<infer TOOLS, any, any>
       ? TOOLS
-      : T;
+      : TOOLSET;
 
 /** Infer the UI tool types from a tool record or ToolSet instance. */
-export type InferUIToolSet<T extends ToolRecord | AnyToolSet> = {
-  [K in keyof InferToolSet<T> & string]: InferUITool<InferToolSet<T>[K]>;
+export type InferUIToolSet<TOOLSET extends ToolRecord | AnyToolSet> = {
+  [K in keyof InferToolSet<TOOLSET> & string]: InferUITool<InferToolSet<TOOLSET>[K]>;
 };
 
 /**
  * Extract tool names tracked as active from an ImmutableToolSet instance.
  * Returns `never` for MutableToolSet (cannot be determined at compile time).
  */
-export type InferActiveTools<T extends AnyToolSet> =
-  T extends ImmutableToolSet<any, any, any, infer A, any> ? A : never;
+export type InferActiveTools<TOOLSET extends AnyToolSet> =
+  TOOLSET extends ImmutableToolSet<any, any, any, infer A, any> ? A : never;
 
 /**
  * Extract tool names tracked as inactive from an ImmutableToolSet instance.
  * Returns `never` for MutableToolSet (cannot be determined at compile time).
  */
-export type InferInactiveTools<T extends AnyToolSet> =
-  T extends ImmutableToolSet<any, any, any, any, infer D> ? D : never;
+export type InferInactiveTools<TOOLSET extends AnyToolSet> =
+  TOOLSET extends ImmutableToolSet<any, any, any, any, infer D> ? D : never;
 
 /**
  * Input passed to activation predicates.
@@ -68,9 +68,35 @@ type ResolvedToolSet<TOOLS extends ToolRecord> = {
 /** Union of both toolset classes for type utility constraints. */
 type AnyToolSet = ImmutableToolSet<any> | MutableToolSet<any>;
 
-/* ------------------------------------------------------------------ */
-/*  ToolSetState                                                       */
-/* ------------------------------------------------------------------ */
+/**
+ * Derive a parameter type that accepts both immutable and mutable variants of an existing tool set.
+ *
+ * `createToolSet({ tools })` returns an `ImmutableToolSet`, while `.clone({ mutable: true })`
+ * returns a structurally distinct `MutableToolSet`. Helpers written against `typeof baseToolSet`
+ * directly cannot accept the cloned mutable instance — `ToolSet<typeof baseToolSet>` resolves
+ * to a union of both flavors and infers `TOOLS`, `MESSAGE`, and `CONTEXT` from the source.
+ *
+ * @example Accept either flavor in a helper function
+ * ```ts
+ * const baseToolSet = createToolSet({ tools }).deactivate(['cancel_order']);
+ *
+ * type MyToolSet = ToolSet<typeof baseToolSet>;
+ *
+ * // Accepts the immutable baseToolSet AND the cloned mutable instance
+ * function activateAdminTools(toolSet: MyToolSet) {
+ *   toolSet.activate(['cancel_order']);
+ * }
+ *
+ * activateAdminTools(baseToolSet);
+ * activateAdminTools(baseToolSet.clone({ mutable: true }));
+ * ```
+ */
+export type ToolSet<TOOLSET extends AnyToolSet> =
+  TOOLSET extends ImmutableToolSet<infer TOOLS, infer MESSAGE, infer CONTEXT, infer ACTIVATED, infer DEACTIVATED>
+    ? ImmutableToolSet<TOOLS, MESSAGE, CONTEXT, ACTIVATED, DEACTIVATED> | MutableToolSet<TOOLS, MESSAGE, CONTEXT>
+    : TOOLSET extends MutableToolSet<infer TOOLS, infer MESSAGE, infer CONTEXT>
+      ? ImmutableToolSet<TOOLS, MESSAGE, CONTEXT, any, any> | MutableToolSet<TOOLS, MESSAGE, CONTEXT>
+      : never;
 
 const toEntries = (
   nameOrPredicates: string | Partial<Record<string, ActivationPredicate<any, any>>>,

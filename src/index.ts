@@ -5,4 +5,5 @@ export {
   type InferInactiveTools,
   type InferToolSet,
   type InferUIToolSet,
+  type ToolSet,
 } from './tool-set.js';

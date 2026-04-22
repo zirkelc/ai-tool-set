@@ -441,6 +441,26 @@ type MyInput = ActivationInput<MyUIMessage, { isAdmin: boolean }>;
 // { messages?: Array<MyUIMessage>; context?: { isAdmin: boolean } }
 ```
 
+### `ToolSet`
+
+Parameter type that accepts both immutable and mutable variants of an existing tool set. Use it for helpers that should work regardless of which flavor the caller is holding:
+
+```ts
+import { createToolSet, type ToolSet } from 'ai-tool-set';
+
+const baseToolSet = createToolSet({ tools }).deactivate(['cancel_order']);
+
+type MyToolSet = ToolSet<typeof baseToolSet>;
+
+// Accepts the immutable baseToolSet AND the cloned mutable instance
+function activateAdminTools(toolSet: MyToolSet) {
+  toolSet.activate(['cancel_order']);
+}
+
+activateAdminTools(baseToolSet);
+activateAdminTools(baseToolSet.clone({ mutable: true }));
+```
+
 ### `InferToolSet`
 
 Extract the raw tool record from a tool record or `ToolSet` instance:
