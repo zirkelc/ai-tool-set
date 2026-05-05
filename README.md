@@ -521,6 +521,19 @@ type Inactive = InferInactiveTools<typeof toolSet>;
 // 'cancel_order'
 ```
 
+### `InferAllTools`
+
+Extract all tool names from a `ToolSet` instance, regardless of activation state. Works for both immutable and mutable toolsets since the tool record is statically known.
+
+```ts
+import type { InferAllTools } from 'ai-tool-set';
+
+const toolSet = createToolSet({ tools }).deactivate(['cancel_order']);
+
+type All = InferAllTools<typeof toolSet>;
+// 'search' | 'list_orders' | 'cancel_order'
+```
+
 ## License
 
 MIT

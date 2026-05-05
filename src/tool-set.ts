@@ -37,6 +37,12 @@ export type InferInactiveTools<TOOLSET extends AnyToolSet> =
   TOOLSET extends ImmutableToolSet<any, any, any, any, infer D> ? D : never;
 
 /**
+ * Extract all tool names from a ToolSet instance — both active and inactive.
+ * Works for both ImmutableToolSet and MutableToolSet since the tool record is statically known.
+ */
+export type InferAllTools<TOOLSET extends AnyToolSet> = keyof InferToolSet<TOOLSET> & string;
+
+/**
  * Input passed to activation predicates.
  * Use `ActivationInput<MyMsg>` to get per-tool narrowing in callbacks.
  */

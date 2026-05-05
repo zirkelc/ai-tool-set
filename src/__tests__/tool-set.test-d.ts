@@ -6,6 +6,7 @@ import {
   createToolSet,
   type ActivationInput,
   type InferActiveTools,
+  type InferAllTools,
   type InferInactiveTools,
   type InferToolSet,
   type InferUIToolSet,
@@ -192,6 +193,31 @@ describe('exported types', () => {
     test('should return never for mutable toolset', () => {
       const toolSet = createToolSet({ tools: TOOLS, mutable: true });
       expectTypeOf<InferInactiveTools<typeof toolSet>>().toEqualTypeOf<never>();
+    });
+  });
+
+  describe('InferAllTools', () => {
+    test('should return all tools for fresh immutable toolset', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      expectTypeOf<InferAllTools<typeof toolSet>>().toEqualTypeOf<'plain' | 'calc' | 'cancel' | 'edit' | 'archive'>();
+    });
+
+    test('should return all tools regardless of activation state', () => {
+      const toolSet = createToolSet({ tools: TOOLS }).deactivate(['plain', 'calc']);
+      expectTypeOf<InferAllTools<typeof toolSet>>().toEqualTypeOf<'plain' | 'calc' | 'cancel' | 'edit' | 'archive'>();
+    });
+
+    test('should return all tools after chained operations', () => {
+      const toolSet = createToolSet({ tools: TOOLS })
+        .deactivate(['cancel'])
+        .activateWhen('edit', () => true)
+        .deactivateWhen('plain', () => true);
+      expectTypeOf<InferAllTools<typeof toolSet>>().toEqualTypeOf<'plain' | 'calc' | 'cancel' | 'edit' | 'archive'>();
+    });
+
+    test('should return all tools for mutable toolset', () => {
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true });
+      expectTypeOf<InferAllTools<typeof toolSet>>().toEqualTypeOf<'plain' | 'calc' | 'cancel' | 'edit' | 'archive'>();
     });
   });
 });
