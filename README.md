@@ -66,9 +66,7 @@ Use `.activate()` and `.deactivate()` to statically control which tools are avai
 import { generateText } from 'ai';
 
 // Activate and deactivate tools
-const toolSet = createToolSet({ tools })
-  .deactivate(['cancel_order'])
-  .activate(['list_orders']);
+const toolSet = createToolSet({ tools }).deactivate(['cancel_order']).activate(['list_orders']);
 
 // Infer active tools
 const { tools, activeTools } = toolSet.inferTools();
@@ -142,11 +140,10 @@ const result = await generateText({ model, tools, activeTools, messages });
 You can also activate multiple tools at once:
 
 ```typescript
-const toolSet = createToolSet({ tools })
-  .activateWhen({
-    list_orders: ({ context }) => context?.isAuthenticated,
-    cancel_order: ({ messages }) => hasUnfulfilledOrders(messages),
-  });
+const toolSet = createToolSet({ tools }).activateWhen({
+  list_orders: ({ context }) => context?.isAuthenticated,
+  cancel_order: ({ messages }) => hasUnfulfilledOrders(messages),
+});
 ```
 
 ### Activation Defaults
@@ -184,11 +181,11 @@ Each activation method appends to an internal list. For each tool, the **last en
 ```typescript
 const toolSet = createToolSet({ tools })
   // cancel_order: activated
-  .activate(['cancel_order']) 
+  .activate(['cancel_order'])
   // cancel_order: deactivated
-  .deactivate(['cancel_order']) 
+  .deactivate(['cancel_order'])
   // cancel_order: deactivated with conditional activation
-  .activateWhen('cancel_order', ({ messages }) => hasUnfulfilledOrders(messages)); 
+  .activateWhen('cancel_order', ({ messages }) => hasUnfulfilledOrders(messages));
 ```
 
 ### Immutable vs Mutable
@@ -297,14 +294,12 @@ If you already have a custom `UIMessage` type, you can pass it as `MESSAGE` gene
 import { myTools } from './my-tools.js';
 import { MyUIMessage } from './my-ui-message.js';
 
-const toolSet = createToolSet<typeof myTools, MyUIMessage>({ tools: myTools })
-  .activateWhen(
-    'cancel_order',
-    ({ messages }) => hasUnfulfilledOrders(messages),
-    // ~~~~~~~~
-    // Messages are now typed as Array<MyUIMessage> | undefined  
-  );
-
+const toolSet = createToolSet<typeof myTools, MyUIMessage>({ tools: myTools }).activateWhen(
+  'cancel_order',
+  ({ messages }) => hasUnfulfilledOrders(messages),
+  // ~~~~~~~~
+  // Messages are now typed as Array<MyUIMessage> | undefined
+);
 
 const { tools, activeTools } = toolSet.inferTools({ messages });
 ```
@@ -319,14 +314,12 @@ import { MyUIMessage } from './my-ui-message.js';
 
 type MyContext = { userId: string; isAdmin: boolean };
 
-const toolSet = createToolSet<typeof myTools, MyUIMessage, MyContext>({ tools: myTools })
-  .activateWhen(
-    'cancel_order',
-    ({ context }) => context?.isAdmin,
-    // ~~~~~~~
-    // Context is typed as MyContext | undefined
-  );
-
+const toolSet = createToolSet<typeof myTools, MyUIMessage, MyContext>({ tools: myTools }).activateWhen(
+  'cancel_order',
+  ({ context }) => context?.isAdmin,
+  // ~~~~~~~
+  // Context is typed as MyContext | undefined
+);
 
 const { tools, activeTools } = toolSet.inferTools({
   messages,
