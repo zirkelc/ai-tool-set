@@ -1,5 +1,6 @@
 import { tool } from 'ai';
 import type { UIMessage } from 'ai';
+import { fromUIMessage } from 'ai-test-kit/ui';
 import { z } from 'zod';
 import { type InferUIToolSet } from '../tool-set.js';
 
@@ -44,8 +45,5 @@ export const TOOLS = {
 
 export type MyUIMessage = UIMessage<unknown, any, InferUIToolSet<typeof TOOLS>>;
 
-export const makeMessage = (parts: MyUIMessage['parts'] = [], role: MyUIMessage['role'] = 'user'): MyUIMessage => ({
-  id: '1',
-  role,
-  parts,
-});
+/** UI message builders bound to MyUIMessage, e.g. UIMessages.user('please cancel'). */
+export const { UIMessages } = fromUIMessage<MyUIMessage>();

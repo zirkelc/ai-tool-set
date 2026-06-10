@@ -1,23 +1,10 @@
 import { generateText, type UIMessage } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModel } from 'ai-test-kit/language';
 import { describe, expect, test } from 'vitest';
 import { createToolSet } from '../tool-set.js';
-import { TOOLS, makeMessage } from './fixtures.js';
+import { TOOLS, UIMessages } from './fixtures.js';
 
-const USAGE = {
-  inputTokens: { total: 0, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
-  outputTokens: { total: 0, text: undefined, reasoning: undefined },
-};
-const STOP = { unified: 'stop' as const, raw: undefined };
-
-const textResult = () => ({
-  content: [{ type: 'text' as const, text: 'Done', id: 'text-1' }],
-  finishReason: STOP,
-  usage: USAGE,
-  warnings: [] as Array<never>,
-});
-
-const getToolNames = (model: MockLanguageModelV3, callIndex = 0) =>
+const getToolNames = (model: MockLanguageModel, callIndex = 0) =>
   model.doGenerateCalls[callIndex]!.tools?.map((t) => t.name) ?? [];
 
 describe('createToolSet', () => {
@@ -137,7 +124,7 @@ describe('immutable toolset', () => {
 
       // Act
       const { activeTools } = toolSet.inferTools({
-        messages: [makeMessage([{ type: 'text', text: 'please cancel' }])],
+        messages: [UIMessages.user('please cancel')],
       });
 
       // Assert
@@ -152,7 +139,7 @@ describe('immutable toolset', () => {
 
       // Act
       const { activeTools } = toolSet.inferTools({
-        messages: [makeMessage([{ type: 'text', text: 'hello' }])],
+        messages: [UIMessages.user('hello')],
       });
 
       // Assert
@@ -170,7 +157,7 @@ describe('immutable toolset', () => {
 
       // Act
       const { activeTools } = toolSet.inferTools({
-        messages: [makeMessage([{ type: 'text', text: 'edit and archive' }])],
+        messages: [UIMessages.user('edit and archive')],
       });
 
       // Assert
@@ -188,7 +175,7 @@ describe('immutable toolset', () => {
 
       // Act
       const { activeTools } = toolSet.inferTools({
-        messages: [makeMessage([{ type: 'text', text: 'no search needed' }])],
+        messages: [UIMessages.user('no search needed')],
       });
 
       // Assert
@@ -203,7 +190,7 @@ describe('immutable toolset', () => {
 
       // Act
       const { activeTools } = toolSet.inferTools({
-        messages: [makeMessage([{ type: 'text', text: 'hello' }])],
+        messages: [UIMessages.user('hello')],
       });
 
       // Assert
@@ -233,7 +220,7 @@ describe('immutable toolset', () => {
 
       // Act
       const { activeTools } = toolSet.inferTools({
-        messages: [makeMessage([{ type: 'text', text: 'cancel' }])],
+        messages: [UIMessages.user('cancel')],
       });
 
       // Assert
@@ -260,7 +247,7 @@ describe('immutable toolset', () => {
 
       // Act
       const { activeTools } = toolSet.inferTools({
-        messages: [makeMessage([{ type: 'text', text: 'cancel' }])],
+        messages: [UIMessages.user('cancel')],
       });
 
       // Assert
@@ -364,7 +351,7 @@ describe('immutable toolset', () => {
 
       // Act
       const { activeTools } = toolSet.inferTools({
-        messages: [makeMessage([{ type: 'text', text: 'cancel order' }])],
+        messages: [UIMessages.user('cancel order')],
       });
 
       // Assert
@@ -485,7 +472,7 @@ describe('immutable toolset', () => {
   describe('generateText integration', () => {
     test('should spread inferTools result into generateText', async () => {
       // Arrange
-      const model = new MockLanguageModelV3({ doGenerate: textResult() });
+      const model = MockLanguageModel.from('Done');
       const toolSet = createToolSet({ tools: TOOLS }).deactivate(['cancel', 'edit', 'archive']);
 
       // Act
@@ -500,11 +487,11 @@ describe('immutable toolset', () => {
 
     test('should spread inferTools with messages into generateText', async () => {
       // Arrange
-      const model = new MockLanguageModelV3({ doGenerate: textResult() });
+      const model = MockLanguageModel.from('Done');
       const toolSet = createToolSet({ tools: TOOLS }).activateWhen('edit', ({ messages }) =>
         messages?.some((m) => m.parts.some((p) => p.type === 'text' && p.text.includes('edit'))),
       );
-      const messages = [makeMessage([{ type: 'text', text: 'edit order' }])];
+      const messages = [UIMessages.user('edit order')];
 
       // Act
       await generateText({ model, ...toolSet.inferTools({ messages }), prompt: 'Hello' });
@@ -603,7 +590,7 @@ describe('mutable toolset', () => {
 
       // Act
       const { activeTools } = toolSet.inferTools({
-        messages: [makeMessage([{ type: 'text', text: 'please cancel' }])],
+        messages: [UIMessages.user('please cancel')],
       });
 
       // Assert
@@ -619,7 +606,7 @@ describe('mutable toolset', () => {
 
       // Act
       const { activeTools } = toolSet.inferTools({
-        messages: [makeMessage([{ type: 'text', text: 'hello' }])],
+        messages: [UIMessages.user('hello')],
       });
 
       // Assert
@@ -637,7 +624,7 @@ describe('mutable toolset', () => {
 
       // Act
       const { activeTools } = toolSet.inferTools({
-        messages: [makeMessage([{ type: 'text', text: 'no search needed' }])],
+        messages: [UIMessages.user('no search needed')],
       });
 
       // Assert
@@ -653,7 +640,7 @@ describe('mutable toolset', () => {
 
       // Act
       const { activeTools } = toolSet.inferTools({
-        messages: [makeMessage([{ type: 'text', text: 'hello' }])],
+        messages: [UIMessages.user('hello')],
       });
 
       // Assert
@@ -713,7 +700,7 @@ describe('mutable toolset', () => {
 
       // Act
       const { activeTools } = toolSet.inferTools({
-        messages: [makeMessage([{ type: 'text', text: 'cancel' }])],
+        messages: [UIMessages.user('cancel')],
       });
 
       // Assert
@@ -744,7 +731,7 @@ describe('mutable toolset', () => {
 
       // Act
       const { activeTools } = toolSet.inferTools({
-        messages: [makeMessage([{ type: 'text', text: 'cancel order' }])],
+        messages: [UIMessages.user('cancel order')],
       });
 
       // Assert
@@ -841,7 +828,7 @@ describe('mutable toolset', () => {
   describe('generateText integration', () => {
     test('should spread inferTools result into generateText', async () => {
       // Arrange
-      const model = new MockLanguageModelV3({ doGenerate: textResult() });
+      const model = MockLanguageModel.from('Done');
       const toolSet = createToolSet({ tools: TOOLS, mutable: true }).deactivate(['cancel', 'edit', 'archive']);
 
       // Act
@@ -856,12 +843,12 @@ describe('mutable toolset', () => {
 
     test('should spread inferTools with messages into generateText', async () => {
       // Arrange
-      const model = new MockLanguageModelV3({ doGenerate: textResult() });
+      const model = MockLanguageModel.from('Done');
       const toolSet = createToolSet({ tools: TOOLS, mutable: true });
       toolSet.activateWhen('edit', ({ messages }) =>
         messages?.some((m) => m.parts.some((p) => p.type === 'text' && p.text.includes('edit'))),
       );
-      const messages = [makeMessage([{ type: 'text', text: 'edit order' }])];
+      const messages = [UIMessages.user('edit order')];
 
       // Act
       await generateText({ model, ...toolSet.inferTools({ messages }), prompt: 'Hello' });
