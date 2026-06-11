@@ -33,13 +33,13 @@
     </g>
 
     <!-- wrench (mid-tone) -->
-    <g transform="translate(360,110) rotate(-20)" fill="#a7b0bd">
+    <g transform="translate(360,110) rotate(-20)" fill="#6ee7b7">
       <rect x="-6" y="-12" width="12" height="56" rx="6"/>
       <path d="M-18 -44 L-18 -26 Q-18 -16 -8 -16 L8 -16 Q18 -16 18 -26 L18 -44 L8 -44 L8 -30 Q8 -26 4 -26 L-4 -26 Q-8 -26 -8 -30 L-8 -44 Z"/>
     </g>
 
     <!-- gear (white = active) -->
-    <g transform="translate(470,110)" stroke="#e6eaf0" fill="none" stroke-linecap="round">
+    <g transform="translate(470,110)" stroke="url(#acc)" fill="none" stroke-linecap="round">
       <circle r="16" stroke-width="11"/>
       <g stroke-width="10">
         <line x1="0" y1="-20" x2="0" y2="-29"/>
