@@ -1,6 +1,9 @@
 <div align='center'>
 
-# ai-tool-set
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.png" />
+  <img src="assets/logo-light.png" alt="ai-tool-set logo" width="400" />
+</picture>
 
 <p align="center">Conditional tool activation for the AI SDK, fully type-safe</p>
 <p align="center">

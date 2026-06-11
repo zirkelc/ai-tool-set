@@ -1,0 +1,50 @@
+<svg width="720" height="290" viewBox="0 0 720 290" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#818cf8"/>
+    </linearGradient>
+    <linearGradient id="accText" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#818cf8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ===== { } braces (a tool set) ===== -->
+  <path d="M170 40 Q150 40 150 68 L150 96 Q150 110 130 110 Q150 110 150 124 L150 152 Q150 180 170 180"
+        fill="none" stroke="url(#acc)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M550 40 Q570 40 570 68 L570 96 Q570 110 590 110 Q570 110 570 124 L570 152 Q570 180 550 180"
+        fill="none" stroke="url(#acc)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- ===== hammer (grey = deactivated) ===== -->
+  <g transform="translate(250,110) rotate(-20)" fill="#94a3b8">
+    <rect x="-7" y="-18" width="14" height="62" rx="7"/>
+    <path d="M-34 -40 Q-40 -28 -30 -22 L-8 -28 L-8 -20 L8 -20 L8 -28 L20 -28 Q30 -28 30 -38 Q30 -48 20 -48 L-8 -48 L-26 -52 Q-36 -50 -34 -40 Z"/>
+  </g>
+
+  <!-- ===== wrench (dark = active) ===== -->
+  <g transform="translate(360,110) rotate(-20)" fill="#1f2937">
+    <rect x="-6" y="-12" width="12" height="56" rx="6"/>
+    <path d="M-18 -44 L-18 -26 Q-18 -16 -8 -16 L8 -16 Q18 -16 18 -26 L18 -44 L8 -44 L8 -30 Q8 -26 4 -26 L-4 -26 Q-8 -26 -8 -30 L-8 -44 Z"/>
+  </g>
+
+  <!-- ===== gear (dark = active) ===== -->
+  <g transform="translate(470,110)" stroke="#1f2937" fill="none" stroke-linecap="round">
+    <circle r="16" stroke-width="11"/>
+    <g stroke-width="10">
+      <line x1="0" y1="-20" x2="0" y2="-29"/>
+      <line x1="14.1" y1="-14.1" x2="20.5" y2="-20.5"/>
+      <line x1="20" y1="0" x2="29" y2="0"/>
+      <line x1="14.1" y1="14.1" x2="20.5" y2="20.5"/>
+      <line x1="0" y1="20" x2="0" y2="29"/>
+      <line x1="-14.1" y1="14.1" x2="-20.5" y2="20.5"/>
+      <line x1="-20" y1="0" x2="-29" y2="0"/>
+      <line x1="-14.1" y1="-14.1" x2="-20.5" y2="-20.5"/>
+    </g>
+  </g>
+
+  <!-- ===== WORDMARK ===== -->
+  <text x="360" y="252" text-anchor="middle"
+        font-family="'JetBrains Mono', monospace" font-weight="700" font-size="74"
+        letter-spacing="-2" fill="#1f2937">ai-<tspan fill="url(#accText)">tool</tspan>-set</text>
+</svg>
