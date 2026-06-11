@@ -16,14 +16,14 @@
   <path d="M550 40 Q570 40 570 68 L570 96 Q570 110 590 110 Q570 110 570 124 L570 152 Q570 180 550 180"
         fill="none" stroke="url(#acc)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
 
-  <!-- ===== hammer (grey = deactivated) ===== -->
-  <g transform="translate(250,110) rotate(-20)" fill="#94a3b8">
+  <!-- ===== hammer (light grey = deactivated) ===== -->
+  <g transform="translate(250,110) rotate(-20)" fill="#aab4c2">
     <rect x="-7" y="-18" width="14" height="62" rx="7"/>
     <path d="M-34 -40 Q-40 -28 -30 -22 L-8 -28 L-8 -20 L8 -20 L8 -28 L20 -28 Q30 -28 30 -38 Q30 -48 20 -48 L-8 -48 L-26 -52 Q-36 -50 -34 -40 Z"/>
   </g>
 
-  <!-- ===== wrench (dark = active) ===== -->
-  <g transform="translate(360,110) rotate(-20)" fill="#1f2937">
+  <!-- ===== wrench (mid-tone) ===== -->
+  <g transform="translate(360,110) rotate(-20)" fill="#647082">
     <rect x="-6" y="-12" width="12" height="56" rx="6"/>
     <path d="M-18 -44 L-18 -26 Q-18 -16 -8 -16 L8 -16 Q18 -16 18 -26 L18 -44 L8 -44 L8 -30 Q8 -26 4 -26 L-4 -26 Q-8 -26 -8 -30 L-8 -44 Z"/>
   </g>
