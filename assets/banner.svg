@@ -61,6 +61,6 @@
 
   <!-- ===== TAGLINE ===== -->
   <text x="640" y="491" text-anchor="middle"
-        font-family="Helvetica, Arial, sans-serif" font-weight="400" font-size="30"
-        letter-spacing="0.2" fill="#9aa4b2">Conditional tool activation for the AI SDK, fully type-safe</text>
+        font-family="'JetBrains Mono', monospace" font-weight="400" font-size="25"
+        letter-spacing="0" fill="#9aa4b2">Conditional tool activation for the AI SDK, fully type-safe</text>
 </svg>
