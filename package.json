@@ -38,7 +38,7 @@
     "@total-typescript/tsconfig": "^1.0.4",
     "@types/node": "^25.5.2",
     "ai": "^6.0.153",
-    "ai-test-kit": "0.0.1",
+    "ai-test-kit": "^1.2.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "oxfmt": "^0.44.0",
