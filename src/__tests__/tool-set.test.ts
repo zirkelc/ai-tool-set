@@ -1,5 +1,5 @@
 import { generateText, type UIMessage } from 'ai';
-import { MockLanguageModel } from 'ai-test-kit/language';
+import { Language, MockLanguageModel } from 'ai-test-kit/language';
 import { describe, expect, test } from 'vitest';
 import { createToolSet } from '../tool-set.js';
 import { TOOLS, UIMessages } from './fixtures.js';
@@ -470,7 +470,7 @@ describe('immutable toolset', () => {
   });
 
   describe('generateText integration', () => {
-    test('should spread inferTools result into generateText', async () => {
+    test('should pass only active tools to the model', async () => {
       // Arrange
       const model = MockLanguageModel.from('Done');
       const toolSet = createToolSet({ tools: TOOLS }).deactivate(['cancel', 'edit', 'archive']);
@@ -485,20 +485,41 @@ describe('immutable toolset', () => {
       expect(toolNames).toContain('calc');
     });
 
-    test('should spread inferTools with messages into generateText', async () => {
-      // Arrange
-      const model = MockLanguageModel.from('Done');
+    test('should execute an active tool the model calls', async () => {
+      // Arrange — the model calls the active `plain` tool
+      const model = MockLanguageModel.from({
+        content: [Language.toolCall({ toolCallId: 'call-1', toolName: 'plain', input: { query: 'search' } })],
+      });
+      const toolSet = createToolSet({ tools: TOOLS }).deactivate(['cancel', 'edit', 'archive']);
+
+      // Act
+      const result = await generateText({ model, ...toolSet.inferTools(), prompt: 'Hello' });
+
+      // Assert — the active tool is called and executed end-to-end
+      expect(result.toolCalls.length).toBe(1);
+      expect(result.toolCalls[0]!.toolName).toBe('plain');
+      expect(result.toolResults[0]!.output).toEqual({ result: 'search' });
+    });
+
+    test('should execute a tool activated by messages', async () => {
+      // Arrange — `edit` only activates when a message mentions it, and the model calls it
+      const model = MockLanguageModel.from({
+        content: [
+          Language.toolCall({ toolCallId: 'call-1', toolName: 'edit', input: { orderId: 'o-1', changes: 'qty=2' } }),
+        ],
+      });
       const toolSet = createToolSet({ tools: TOOLS }).activateWhen('edit', ({ messages }) =>
         messages?.some((m) => m.parts.some((p) => p.type === 'text' && p.text.includes('edit'))),
       );
       const messages = [UIMessages.user('edit order')];
 
       // Act
-      await generateText({ model, ...toolSet.inferTools({ messages }), prompt: 'Hello' });
+      const result = await generateText({ model, ...toolSet.inferTools({ messages }), prompt: 'Hello' });
 
-      // Assert
-      const toolNames = getToolNames(model);
-      expect(toolNames).toContain('edit');
+      // Assert — the message-activated tool is passed and executed
+      expect(getToolNames(model)).toContain('edit');
+      expect(result.toolCalls[0]!.toolName).toBe('edit');
+      expect(result.toolResults[0]!.output).toEqual({ success: true });
     });
   });
 });
@@ -826,7 +847,7 @@ describe('mutable toolset', () => {
   });
 
   describe('generateText integration', () => {
-    test('should spread inferTools result into generateText', async () => {
+    test('should pass only active tools to the model', async () => {
       // Arrange
       const model = MockLanguageModel.from('Done');
       const toolSet = createToolSet({ tools: TOOLS, mutable: true }).deactivate(['cancel', 'edit', 'archive']);
@@ -841,9 +862,29 @@ describe('mutable toolset', () => {
       expect(toolNames).toContain('calc');
     });
 
-    test('should spread inferTools with messages into generateText', async () => {
-      // Arrange
-      const model = MockLanguageModel.from('Done');
+    test('should execute an active tool the model calls', async () => {
+      // Arrange — the model calls the active `plain` tool
+      const model = MockLanguageModel.from({
+        content: [Language.toolCall({ toolCallId: 'call-1', toolName: 'plain', input: { query: 'search' } })],
+      });
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true }).deactivate(['cancel', 'edit', 'archive']);
+
+      // Act
+      const result = await generateText({ model, ...toolSet.inferTools(), prompt: 'Hello' });
+
+      // Assert — the active tool is called and executed end-to-end
+      expect(result.toolCalls.length).toBe(1);
+      expect(result.toolCalls[0]!.toolName).toBe('plain');
+      expect(result.toolResults[0]!.output).toEqual({ result: 'search' });
+    });
+
+    test('should execute a tool activated by messages', async () => {
+      // Arrange — `edit` only activates when a message mentions it, and the model calls it
+      const model = MockLanguageModel.from({
+        content: [
+          Language.toolCall({ toolCallId: 'call-1', toolName: 'edit', input: { orderId: 'o-1', changes: 'qty=2' } }),
+        ],
+      });
       const toolSet = createToolSet({ tools: TOOLS, mutable: true });
       toolSet.activateWhen('edit', ({ messages }) =>
         messages?.some((m) => m.parts.some((p) => p.type === 'text' && p.text.includes('edit'))),
@@ -851,11 +892,12 @@ describe('mutable toolset', () => {
       const messages = [UIMessages.user('edit order')];
 
       // Act
-      await generateText({ model, ...toolSet.inferTools({ messages }), prompt: 'Hello' });
+      const result = await generateText({ model, ...toolSet.inferTools({ messages }), prompt: 'Hello' });
 
-      // Assert
-      const toolNames = getToolNames(model);
-      expect(toolNames).toContain('edit');
+      // Assert — the message-activated tool is passed and executed
+      expect(getToolNames(model)).toContain('edit');
+      expect(result.toolCalls[0]!.toolName).toBe('edit');
+      expect(result.toolResults[0]!.output).toEqual({ success: true });
     });
   });
 });
