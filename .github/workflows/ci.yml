@@ -69,64 +69,50 @@ jobs:
       - name: Publish Preview
         run: npx pkg-pr-new publish --pnpm --packageManager=pnpm
 
+  # Creates and maintains a release PR; on merge to main it tags and creates a GitHub Release.
+  # Uses release-please-config.json and .release-please-manifest.json (manifest mode).
   release:
     name: Release
     runs-on: ubuntu-latest
+    needs: [lint, test]
     if: github.ref == 'refs/heads/main'
-    outputs:
-      releases_created: ${{ steps.release.outputs.releases_created }}
-      release_created: ${{ steps.release.outputs.release_created }}
-      id: ${{ steps.release.outputs.id }}
-      name: ${{ steps.release.outputs.name }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-      sha: ${{ steps.release.outputs.sha }}
-      body: ${{ steps.release.outputs.body }}
-      html_url: ${{ steps.release.outputs.html_url }}
-      draft: ${{ steps.release.outputs.draft }}
-      upload_url: ${{ steps.release.outputs.upload_url }}
-      path: ${{ steps.release.outputs.path }}
-      version: ${{ steps.release.outputs.version }}
-      major: ${{ steps.release.outputs.major }}
-      minor: ${{ steps.release.outputs.minor }}
-      patch: ${{ steps.release.outputs.patch }}
-      paths_released: ${{ steps.release.outputs.paths_released }}
-      prs_created: ${{ steps.release.outputs.prs_created }}
     steps:
       # https://github.com/googleapis/release-please-action
       - name: Release Please
-        uses: googleapis/release-please-action@v4
-        id: release
+        uses: googleapis/release-please-action@v5
         with:
           # https://github.com/googleapis/release-please-action?tab=readme-ov-file#github-credentials
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-          release-type: node
-          always-update: true
 
-      - name: Output Release Information
-        run: |
-          {
-            echo "releases_created=${{ steps.release.outputs.releases_created }}"
-            echo "release_created=${{ steps.release.outputs.release_created }}"
-            echo "id=${{ steps.release.outputs.id }}"
-            echo "name=${{ steps.release.outputs.name }}"
-            echo "tag_name=${{ steps.release.outputs.tag_name }}"
-            echo "sha=${{ steps.release.outputs.sha }}"
-            echo "body<<EOF"
-            echo "${{ steps.release.outputs.body }}"
-            echo "EOF"
-            echo "html_url=${{ steps.release.outputs.html_url }}"
-            echo "draft=${{ steps.release.outputs.draft }}"
-            echo "upload_url=${{ steps.release.outputs.upload_url }}"
-            echo "path=${{ steps.release.outputs.path }}"
-            echo "version=${{ steps.release.outputs.version }}"
-            echo "major=${{ steps.release.outputs.major }}"
-            echo "minor=${{ steps.release.outputs.minor }}"
-            echo "patch=${{ steps.release.outputs.patch }}"
-            echo "paths_released=${{ steps.release.outputs.paths_released }}"
-            echo "prs_created=${{ steps.release.outputs.prs_created }}"
-          } | tee -a "$GITHUB_OUTPUT"
+  # Prerelease (next) line, cut from the `next` branch. Isolated from the stable
+  # release above: it uses its OWN config and manifest (*.next.json) so the
+  # `next` branch never touches main's release-please files. Auto-merges the
+  # release PR so every push to `next` cuts a new prerelease (tag + GitHub
+  # Release flagged prerelease), which release.yml then publishes under the
+  # `next` dist-tag. Delete this job and the *.next.json files when the major
+  # lands on `main`.
+  release-next:
+    name: Release Next
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    if: github.ref == 'refs/heads/next'
+    steps:
+      # https://github.com/googleapis/release-please-action
+      - name: Release Please
+        id: release
+        uses: googleapis/release-please-action@v5
+        with:
+          # https://github.com/googleapis/release-please-action?tab=readme-ov-file#github-credentials
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          target-branch: next
+          config-file: release-please-config.next.json
+          manifest-file: .release-please-manifest.next.json
 
-      - name: Print Release Details
+      # Gated: GitHub auto-merge waits for the branch's required status checks
+      # before merging. Once merged, release-please tags + creates the GitHub
+      # release, which triggers the publish workflow.
+      - name: Enable auto-merge on the next release PR
+        if: ${{ steps.release.outputs.pr }}
         env:
-          RELEASE: ${{ toJSON(steps.release.outputs) }}
-        run: echo "$RELEASE"
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: gh pr merge --squash --auto -R "${{ github.repository }}" "${{ fromJSON(steps.release.outputs.pr).number }}"
