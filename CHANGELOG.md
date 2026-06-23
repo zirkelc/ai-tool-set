@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.2](https://github.com/zirkelc/ai-tool-set/compare/v1.2.1...v1.2.2) (2026-06-23)
+
+
+### Tests
+
+* drive tool execution end-to-end in integration tests ([10a4af0](https://github.com/zirkelc/ai-tool-set/commit/10a4af0d0488f30e0ff65bbcb479899eb762f8a6))
+
+
+### Miscellaneous Chores
+
+* upgrade ai-test-kit to 2.0.0-next.2 ([341bab2](https://github.com/zirkelc/ai-tool-set/commit/341bab20c5eedf5eef7e645c145ba0e8e23ff7c1))
+
 ## [1.2.1](https://github.com/zirkelc/ai-tool-set/compare/v1.2.0...v1.2.1) (2026-06-23)
 
 
