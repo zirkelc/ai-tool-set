@@ -29,11 +29,12 @@ This library wraps standard AI SDK `tool()` definitions with chainable activatio
 > [!NOTE]
 > Version compatibility:
 >
-> - Use [`ai-tool-set@1.x`](https://github.com/zirkelc/ai-tool-set/tree/v1.x) for AI SDK v6 (provider spec `v3`)
-> - Use [`ai-tool-set@next`](https://github.com/zirkelc/ai-tool-set/tree/next) for AI SDK v7 (provider spec `v4`)
+> - Use [`ai-tool-set@1.x`](https://github.com/zirkelc/ai-tool-set/tree/v1.x) for AI SDK v6
+> - Use [`ai-tool-set@2.x`](https://github.com/zirkelc/ai-tool-set/tree/v2.x) for AI SDK v7
 
 ```bash
-npm install ai-tool-set
+npm install ai-tool-set@1 # AI SDK v6
+npm install ai-tool-set@2 # AI SDK v7
 ```
 
 ## Usage
