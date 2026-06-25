@@ -12,18 +12,25 @@
 
 </div>
 
-This library provides a type-safe API to manage [`activeTools`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text#active-tools) for [`generateText()`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text) and [`streamText()`](https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text) in the AI SDK.
+This library provides a type-safe API to manage [`activeTools`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text#active-tools) and [`toolApproval`](https://ai-sdk.dev/docs/agents/tool-approvals) for [`generateText()`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text) and [`streamText()`](https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text) in the AI SDK.
 
 ### Why?
 
-The AI SDK provides an `activeTools` parameter to control which tools the model can use at any given time. However, managing tool activation becomes complex when you need to:
+The AI SDK provides an `activeTools` parameter to control which tools the model can use, and a `toolApproval` parameter to gate tool execution. However, managing this becomes complex when you need to:
 
 - **Statically activate/deactivate tools**: Some tools should be inactive by default and only available after being explicitly activated
 - **Dynamically infer tool activation**: Some tools should be activated based on runtime context like the conversation history
+- **Control tool approval**: Some tools should require human approval, or be auto-approved or denied based on context
 
-This library wraps standard AI SDK `tool()` definitions with chainable activation methods and resolves `tools` and `activeTools` for any AI SDK function.
+This library wraps standard AI SDK `tool()` definitions with chainable activation and approval methods, and resolves `tools`, `activeTools`, and `toolApproval` for any AI SDK function.
 
 ### Installation
+
+> [!NOTE]
+> Version compatibility:
+>
+> - Use [`ai-tool-set@1.x`](https://github.com/zirkelc/ai-tool-set/tree/v1.x) for AI SDK v6 (provider spec `v3`)
+> - Use [`ai-tool-set@next`](https://github.com/zirkelc/ai-tool-set/tree/next) for AI SDK v7 (provider spec `v4`)
 
 ```bash
 npm install ai-tool-set
@@ -87,12 +94,12 @@ const result = await generateText({
 
 ### Conditional Activation
 
-Use `.activateWhen()` and `.deactivateWhen()` to conditionally control tools based on messages and context. The predicate receives an input with `messages` and `context` (both can be `undefined` if not provided to `inferTools`) and should return a boolean (or undefined) to determine whether the tool should be activated/deactivated.
+Use `.activateWhen()` and `.deactivateWhen()` to conditionally control tools based on messages and context. The predicate receives an input with `messages` and `toolSetContext` (both can be `undefined` if not provided to `inferTools`) and should return a boolean (or undefined) to determine whether the tool should be activated/deactivated.
 
 ```typescript
 // Conditional activation with a predicate that checks for unfulfilled orders in the messages
 const toolSet = createToolSet({ tools })
-  .activateWhen('list_orders', ({ context }) => context?.isAuthenticated)
+  .activateWhen('list_orders', ({ toolSetContext }) => toolSetContext?.isAuthenticated)
   .activateWhen('cancel_order', ({ messages }) =>
     messages?.some((m) =>
       m.parts.some(
@@ -105,7 +112,7 @@ const toolSet = createToolSet({ tools })
   );
 ```
 
-Call `.inferTools()` with messages and/or context to evaluate activation predicates and resolve `activeTools`:
+Call `.inferTools()` with messages and/or `toolSetContext` to evaluate activation predicates and resolve `activeTools`:
 
 ```typescript
 const messages = [
@@ -132,10 +139,10 @@ const messages = [
   },
 ];
 
-const context = { isAuthenticated: true };
+const toolSetContext = { isAuthenticated: true };
 
 // cancel_order is now active because list_orders returned unfulfilled orders
-const { tools, activeTools } = toolSet.inferTools({ messages, context });
+const { tools, activeTools } = toolSet.inferTools({ messages, toolSetContext });
 
 const result = await generateText({ model, tools, activeTools, messages });
 ```
@@ -144,7 +151,7 @@ You can also activate multiple tools at once:
 
 ```typescript
 const toolSet = createToolSet({ tools }).activateWhen({
-  list_orders: ({ context }) => context?.isAuthenticated,
+  list_orders: ({ toolSetContext }) => toolSetContext?.isAuthenticated,
   cancel_order: ({ messages }) => hasUnfulfilledOrders(messages),
 });
 ```
@@ -189,6 +196,54 @@ const toolSet = createToolSet({ tools })
   .deactivate(['cancel_order'])
   // cancel_order: deactivated with conditional activation
   .activateWhen('cancel_order', ({ messages }) => hasUnfulfilledOrders(messages));
+```
+
+### Tool Approval
+
+> [!NOTE]
+> Tool approval requires AI SDK v7 (`ai-tool-set@2.x`).
+
+The AI SDK can gate tool execution with [`toolApproval`](https://ai-sdk.dev/docs/agents/tool-approvals). `.inferTools()` resolves a `toolApproval` record alongside `tools` and `activeTools`, so a single tool set drives both activation and approval.
+
+Use `.approve()` and `.deny()` for static decisions, and `.approval()` for dynamic ones:
+
+```typescript
+const toolSet = createToolSet({ tools })
+  // Always auto-approve
+  .approve(['list_orders'])
+  // Always require human approval
+  .approval('cancel_order', 'user-approval')
+  // Decide dynamically from the toolset context
+  .approval('search', ({ toolSetContext }) => (toolSetContext?.isAdmin ? 'approved' : 'denied'));
+
+const { tools, activeTools, toolApproval } = toolSet.inferTools({ toolSetContext: { isAdmin: false } });
+
+const result = await generateText({ model, tools, activeTools, toolApproval, prompt: 'Cancel order 1001' });
+```
+
+A tool with no approval entry defaults to `'not-applicable'` (runs without approval). Approval resolution follows the same **last-call wins** rule as activation.
+
+An `.approval()` entry is either a constant [`ToolApprovalStatus`](https://ai-sdk.dev/docs/agents/tool-approvals) (`'approved'`, `'denied'`, `'user-approval'`, `'not-applicable'`) or a **resolver**. The resolver runs inside `.inferTools()` with your toolset values (`{ messages, toolSetContext }`) and returns either:
+
+- a final status decided right there, or
+- a [`SingleToolApprovalFunction`](https://ai-sdk.dev/docs/agents/tool-approvals) deferred to tool-call time, which the AI SDK invokes with the tool input and its own runtime values (`runtimeContext`, model messages, tool context).
+
+This two-layer shape keeps the two contexts distinct: `toolSetContext` (yours, available now in `inferTools`) versus the AI SDK's `runtimeContext` (live at tool-call time). Decide with what you know up front, and defer to the live tool input when you don't:
+
+```typescript
+type ToolSetContext = { isAdmin: boolean };
+type RuntimeContext = { region: string };
+
+const toolSet = createToolSet<typeof tools, MyUIMessage, ToolSetContext, RuntimeContext>({ tools }).approval(
+  'cancel_order',
+  ({ toolSetContext }) =>
+    // Decide now from the toolset context...
+    toolSetContext?.isAdmin
+      ? 'approved'
+      : // ...or defer to the AI SDK with the actual tool input + runtime context
+        (input, { runtimeContext }) =>
+          input.orderId.startsWith('eu-') && runtimeContext.region === 'eu' ? 'approved' : 'user-approval',
+);
 ```
 
 ### Immutable vs Mutable
@@ -309,24 +364,51 @@ const { tools, activeTools } = toolSet.inferTools({ messages });
 
 ### Custom Context
 
-Pass a `CONTEXT` generic to `createToolSet()` to type the `context` field in predicates and `inferTools`:
+The AI SDK has its own [`runtimeContext`](https://ai-sdk.dev/docs/ai-sdk-core/runtime-and-tool-context#runtime-context) and [`toolsContext`](https://ai-sdk.dev/docs/ai-sdk-core/runtime-and-tool-context#tool-context) that flow through generation and are available at tool-call time. `toolSetContext` is this library's own context, evaluated at `.inferTools()` time. It can share the shape of your AI SDK `runtimeContext`, or be something completely different.
+
+Pass a `TOOLSET_CONTEXT` generic to `createToolSet()` to type the `toolSetContext` field in predicates, approval resolvers, and `inferTools`:
 
 ```typescript
 import { myTools } from './my-tools.js';
 import { MyUIMessage } from './my-ui-message.js';
 
-type MyContext = { userId: string; isAdmin: boolean };
+type MyToolSetContext = { userId: string; isAdmin: boolean };
 
-const toolSet = createToolSet<typeof myTools, MyUIMessage, MyContext>({ tools: myTools }).activateWhen(
+const toolSet = createToolSet<typeof myTools, MyUIMessage, MyToolSetContext>({ tools: myTools }).activateWhen(
   'cancel_order',
-  ({ context }) => context?.isAdmin,
-  // ~~~~~~~
-  // Context is typed as MyContext | undefined
+  ({ toolSetContext }) => toolSetContext?.isAdmin,
+  // ~~~~~~~~~~~~~~
+  // toolSetContext is typed as MyToolSetContext | undefined
 );
 
 const { tools, activeTools } = toolSet.inferTools({
   messages,
-  context: { userId: '1', isAdmin: true },
+  toolSetContext: { userId: '1', isAdmin: true },
+});
+```
+
+A fourth `RUNTIME_CONTEXT` generic types the AI SDK `runtimeContext` that a deferred approval function receives at tool-call time (defaults to `unknown`). It is separate from `toolSetContext` and is passed to `generateText()` as a plain value:
+
+```typescript
+type RuntimeContext = { region: string };
+
+const toolSet = createToolSet<typeof myTools, MyUIMessage, MyToolSetContext, RuntimeContext>({
+  tools: myTools,
+}).approval(
+  'cancel_order',
+  () =>
+    (input, { runtimeContext }) =>
+      runtimeContext.region === 'eu' ? 'user-approval' : 'approved',
+  //                  ~~~~~~~~~~~~~~
+  //                  runtimeContext is typed as RuntimeContext
+);
+
+// Pass the matching runtimeContext to generateText — the AI SDK forwards it to the deferred function
+const result = await generateText({
+  model,
+  ...toolSet.inferTools(),
+  runtimeContext: { region: 'eu' },
+  prompt: 'Cancel order eu-1001',
 });
 ```
 
@@ -372,47 +454,89 @@ toolSet.deactivate(['search']);
 
 #### `.activateWhen(name, predicate)` / `.activateWhen(predicates)`
 
-Conditionally activate tools. The predicate receives `{ messages, context }` and returns `true` to activate. Both `messages` and `context` can be `undefined` if not provided to `inferTools`. Returning `undefined` is treated as `false`.
+Conditionally activate tools. The predicate receives `{ messages, toolSetContext }` and returns `true` to activate. Both `messages` and `toolSetContext` can be `undefined` if not provided to `inferTools`. Returning `undefined` is treated as `false`.
 
 ```ts
 toolSet.activateWhen('cancel_order', ({ messages }) => messages?.some((m) => hasOrders(m)));
 
 toolSet.activateWhen({
   cancel_order: ({ messages }) => messages?.some((m) => hasOrders(m)),
-  list_orders: ({ context }) => context?.isAuthenticated,
+  list_orders: ({ toolSetContext }) => toolSetContext?.isAuthenticated,
 });
 ```
 
 #### `.deactivateWhen(name, predicate)` / `.deactivateWhen(predicates)`
 
-Conditionally deactivate tools. The predicate receives `{ messages, context }` and returns `true` to deactivate. Both `messages` and `context` can be `undefined` if not provided to `inferTools`. Returning `undefined` is treated as `false` (tool stays active).
+Conditionally deactivate tools. The predicate receives `{ messages, toolSetContext }` and returns `true` to deactivate. Both `messages` and `toolSetContext` can be `undefined` if not provided to `inferTools`. Returning `undefined` is treated as `false` (tool stays active).
 
 ```ts
 toolSet.deactivateWhen('search', ({ messages }) => messages && messages.length > 10);
 ```
 
+#### `.approve(names)`
+
+Statically approve tools by name (status `'approved'`). Returns a new instance (immutable) or `this` (mutable).
+
+```ts
+toolSet.approve(['list_orders']);
+```
+
+#### `.deny(names)`
+
+Statically deny tools by name (status `'denied'`). Returns a new instance (immutable) or `this` (mutable).
+
+```ts
+toolSet.deny(['cancel_order']);
+```
+
+#### `.approval(name, entry)` / `.approval(entries)`
+
+Set a tool's approval to a constant `ToolApprovalStatus` or a resolver. A resolver receives `{ messages, toolSetContext }` and returns either a final status or a `SingleToolApprovalFunction` that the AI SDK calls at tool-call time. Last-call wins.
+
+```ts
+// Constant status
+toolSet.approval('cancel_order', 'user-approval');
+
+// Resolver — decide from the toolset context
+toolSet.approval('cancel_order', ({ toolSetContext }) => (toolSetContext?.isAdmin ? 'approved' : 'user-approval'));
+
+// Resolver — defer to the AI SDK with the tool input + runtime context
+toolSet.approval(
+  'cancel_order',
+  () =>
+    (input, { runtimeContext }) =>
+      input.orderId ? 'approved' : 'denied',
+);
+
+// Multiple tools at once
+toolSet.approval({
+  search: 'approved',
+  cancel_order: ({ toolSetContext }) => (toolSetContext?.isAdmin ? 'approved' : 'denied'),
+});
+```
+
 #### `.inferTools(input?)`
 
-Evaluate all predicates and return `{ tools, activeTools }`, directly spreadable into `generateText()` or `streamText()`. The input is optional; all fields are optional. Predicates receive `undefined` for fields not provided.
+Evaluate all predicates and approval resolvers and return `{ tools, activeTools, toolApproval }`, directly spreadable into `generateText()` or `streamText()`. The input is optional; all fields are optional. Predicates and resolvers receive `undefined` for fields not provided.
 
 - `input` (optional):
   - `messages` (optional), the current conversation messages
-  - `context` (optional), arbitrary values passed to predicates
+  - `toolSetContext` (optional), arbitrary values passed to predicates and approval resolvers
 
 ```ts
 // Static-only (no predicates)
-const { tools, activeTools } = toolSet.inferTools();
+const { tools, activeTools, toolApproval } = toolSet.inferTools();
 
 // With messages
-const { tools, activeTools } = toolSet.inferTools({ messages });
+const { tools, activeTools, toolApproval } = toolSet.inferTools({ messages });
 
-// With context
-const { tools, activeTools } = toolSet.inferTools({ context: { isAdmin: true } });
+// With toolSetContext
+const { tools, activeTools, toolApproval } = toolSet.inferTools({ toolSetContext: { isAdmin: true } });
 
 // With both
-const { tools, activeTools } = toolSet.inferTools({ messages, context });
+const { tools, activeTools, toolApproval } = toolSet.inferTools({ messages, toolSetContext });
 
-const result = await generateText({ model, tools, activeTools, messages });
+const result = await generateText({ model, tools, activeTools, toolApproval, messages });
 ```
 
 #### `.clone(options?)`
@@ -426,15 +550,15 @@ const immutableClone = toolSet.clone();
 
 ## Types
 
-### `ActivationInput`
+### `InferToolsInput`
 
-Input passed to activation predicates. Generic over `MESSAGE` and `CONTEXT`. Both `messages` and `context` are optional since they may not be provided to `inferTools`:
+Input passed to `inferTools()`, activation predicates, and approval resolvers. Generic over `MESSAGE` and `TOOLSET_CONTEXT`. Both `messages` and `toolSetContext` are optional since they may not be provided to `inferTools`:
 
 ```ts
-import type { ActivationInput } from 'ai-tool-set';
+import type { InferToolsInput } from 'ai-tool-set';
 
-type MyInput = ActivationInput<MyUIMessage, { isAdmin: boolean }>;
-// { messages?: Array<MyUIMessage>; context?: { isAdmin: boolean } }
+type MyInput = InferToolsInput<MyUIMessage, { isAdmin: boolean }>;
+// { messages?: Array<MyUIMessage>; toolSetContext?: { isAdmin: boolean } }
 ```
 
 ### `ToolSet`
@@ -457,6 +581,27 @@ activateTools(toolSet);
 
 const mutableToolSet = toolSet.clone({ mutable: true });
 activateTools(mutableToolSet);
+```
+
+### `ApprovalResolver`
+
+The function form of an approval entry. Runs inside `inferTools()` with `{ messages, toolSetContext }` and returns either a final `ToolApprovalStatus` or a `SingleToolApprovalFunction` (from `ai`) deferred to tool-call time. Generic over the tool, `MESSAGE`, `TOOLSET_CONTEXT`, and the AI SDK `RUNTIME_CONTEXT` (defaults to `unknown`):
+
+```ts
+import type { ApprovalResolver } from 'ai-tool-set';
+
+const resolver: ApprovalResolver<typeof cancelOrderTool> = ({ toolSetContext }) =>
+  toolSetContext?.isAdmin ? 'approved' : 'user-approval';
+```
+
+### `ApprovalEntry`
+
+A tool's approval value accepted by `.approval()`: a constant `ToolApprovalStatus` or an `ApprovalResolver`.
+
+```ts
+import type { ApprovalEntry } from 'ai-tool-set';
+
+const entry: ApprovalEntry<typeof cancelOrderTool> = 'user-approval';
 ```
 
 ### `InferToolSet`
