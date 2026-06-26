@@ -1,2 +1,4 @@
 minimumReleaseAgeExclude:
+  - ai
+  - '@ai-sdk/*'
   - ai-test-kit

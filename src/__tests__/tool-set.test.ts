@@ -5,7 +5,7 @@ import { createToolSet } from '../tool-set.js';
 import { TOOLS, UIMessages } from './fixtures.js';
 
 const getToolNames = (model: MockLanguageModel, callIndex = 0) =>
-  model.doGenerateCalls[callIndex]!.tools?.map((t) => t.name) ?? [];
+  model.doGenerate.mock.calls[callIndex]?.[0]?.tools?.map((t) => t.name) ?? [];
 
 describe('createToolSet', () => {
   test('should return immutable toolset by default', () => {
@@ -254,14 +254,14 @@ describe('immutable toolset', () => {
       expect(activeTools).toContain('cancel');
     });
 
-    test('should accept context without messages', () => {
+    test('should accept toolSetContext without messages', () => {
       // Arrange
       const toolSet = createToolSet<typeof TOOLS, UIMessage, { isAdmin: boolean }>({
         tools: TOOLS,
-      }).activateWhen('cancel', ({ context }) => context?.isAdmin);
+      }).activateWhen('cancel', ({ toolSetContext }) => toolSetContext?.isAdmin);
 
       // Act
-      const { activeTools } = toolSet.inferTools({ context: { isAdmin: true } });
+      const { activeTools } = toolSet.inferTools({ toolSetContext: { isAdmin: true } });
 
       // Assert
       expect(activeTools).toContain('cancel');
@@ -308,11 +308,11 @@ describe('immutable toolset', () => {
       expect(receivedMessages).toBe(undefined);
     });
 
-    test('should pass undefined context to predicates when not provided', () => {
+    test('should pass undefined toolSetContext to predicates when not provided', () => {
       // Arrange
       let receivedContext: unknown = 'not-called';
-      const toolSet = createToolSet({ tools: TOOLS }).activateWhen('cancel', ({ context }) => {
-        receivedContext = context;
+      const toolSet = createToolSet({ tools: TOOLS }).activateWhen('cancel', ({ toolSetContext }) => {
+        receivedContext = toolSetContext;
         return false;
       });
 
@@ -385,18 +385,131 @@ describe('immutable toolset', () => {
     });
   });
 
-  describe('context', () => {
-    test('should pass context to predicates', () => {
+  describe('toolSetContext', () => {
+    test('should pass toolSetContext to predicates', () => {
       // Arrange
       const toolSet = createToolSet<typeof TOOLS, UIMessage, { isAdmin: boolean }>({
         tools: TOOLS,
-      }).activateWhen('cancel', ({ context }) => context?.isAdmin);
+      }).activateWhen('cancel', ({ toolSetContext }) => toolSetContext?.isAdmin);
 
       // Act
-      const { activeTools } = toolSet.inferTools({ context: { isAdmin: true } });
+      const { activeTools } = toolSet.inferTools({ toolSetContext: { isAdmin: true } });
 
       // Assert
       expect(activeTools).toContain('cancel');
+    });
+  });
+
+  describe('approval', () => {
+    test('should omit tools without an approval entry', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS });
+
+      // Act
+      const { toolApproval } = toolSet.inferTools();
+
+      // Assert
+      expect(Object.keys(toolApproval).length).toBe(0);
+    });
+
+    test('should set approved status via approve', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).approve(['cancel']);
+
+      // Act
+      const { toolApproval } = toolSet.inferTools();
+
+      // Assert
+      expect(toolApproval.cancel).toBe('approved');
+    });
+
+    test('should set denied status via deny', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).deny(['cancel']);
+
+      // Act
+      const { toolApproval } = toolSet.inferTools();
+
+      // Assert
+      expect(toolApproval.cancel).toBe('denied');
+    });
+
+    test('should set a constant status via approval', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).approval('cancel', 'user-approval');
+
+      // Act
+      const { toolApproval } = toolSet.inferTools();
+
+      // Assert
+      expect(toolApproval.cancel).toBe('user-approval');
+    });
+
+    test('should run a resolver and store its returned status', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).approval('cancel', () => 'denied');
+
+      // Act
+      const { toolApproval } = toolSet.inferTools();
+
+      // Assert — a resolver returning a constant produces that constant
+      expect(toolApproval.cancel).toBe('denied');
+    });
+
+    test('should store a deferred function returned by a resolver', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).approval('cancel', () => () => 'approved');
+
+      // Act
+      const { toolApproval } = toolSet.inferTools();
+
+      // Assert — a resolver returning an AI SDK function passes it through
+      expect(typeof toolApproval.cancel).toBe('function');
+    });
+
+    test('should accept the record form', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).approval({
+        cancel: 'denied',
+        edit: 'user-approval',
+      });
+
+      // Act
+      const { toolApproval } = toolSet.inferTools();
+
+      // Assert
+      expect(toolApproval.cancel).toBe('denied');
+      expect(toolApproval.edit).toBe('user-approval');
+    });
+
+    test('should pass inferTools messages and toolSetContext to the resolver', () => {
+      // Arrange
+      const messages = [UIMessages.user('cancel order')];
+      let received: unknown;
+      const toolSet = createToolSet<typeof TOOLS, UIMessage, { isAdmin: boolean }>({
+        tools: TOOLS,
+      }).approval('cancel', (input) => {
+        received = input;
+        return 'approved';
+      });
+
+      // Act
+      const { toolApproval } = toolSet.inferTools({ messages, toolSetContext: { isAdmin: true } });
+
+      // Assert — the resolver runs at inferTools time with the toolset's own values
+      expect(toolApproval.cancel).toBe('approved');
+      expect(received).toEqual({ messages, toolSetContext: { isAdmin: true } });
+    });
+
+    test('should let the last approval entry win', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).approve(['cancel']).deny(['cancel']);
+
+      // Act
+      const { toolApproval } = toolSet.inferTools();
+
+      // Assert
+      expect(toolApproval.cancel).toBe('denied');
     });
   });
 
@@ -519,6 +632,72 @@ describe('immutable toolset', () => {
       // Assert — the message-activated tool is passed and executed
       expect(getToolNames(model)).toContain('edit');
       expect(result.toolCalls[0]!.toolName).toBe('edit');
+      expect(result.toolResults[0]!.output).toEqual({ success: true });
+    });
+
+    test('should not execute a tool denied by approval', async () => {
+      // Arrange — the model calls `cancel`, but the toolset denies it
+      const model = MockLanguageModel.from({
+        content: [Language.toolCall({ toolCallId: 'call-1', toolName: 'cancel', input: { orderId: 'o-1' } })],
+      });
+      const toolSet = createToolSet({ tools: TOOLS }).deny(['cancel']);
+
+      // Act
+      const result = await generateText({ model, ...toolSet.inferTools(), prompt: 'Hello' });
+
+      // Assert — the call is emitted but never executed
+      expect(result.toolCalls.length).toBe(1);
+      expect(result.toolResults.length).toBe(0);
+      expect(result.content.map((c) => c.type)).toContain('tool-approval-response');
+    });
+
+    test('should auto-approve via a resolver using toolSetContext and execute', async () => {
+      // Arrange — the model calls `cancel`; the resolver decides now from toolSetContext
+      const model = MockLanguageModel.from({
+        content: [Language.toolCall({ toolCallId: 'call-1', toolName: 'cancel', input: { orderId: 'o-1' } })],
+      });
+      const toolSet = createToolSet<typeof TOOLS, UIMessage, { isAdmin: boolean }>({ tools: TOOLS }).approval(
+        'cancel',
+        ({ toolSetContext }) => (toolSetContext?.isAdmin ? 'approved' : 'denied'),
+      );
+
+      // Act
+      const result = await generateText({
+        model,
+        ...toolSet.inferTools({ toolSetContext: { isAdmin: true } }),
+        prompt: 'Hello',
+      });
+
+      // Assert — auto-approved, so the tool executes end-to-end
+      expect(result.toolResults.length).toBe(1);
+      expect(result.toolResults[0]!.output).toEqual({ success: true });
+    });
+
+    test('should defer approval to an AI SDK function and execute when approved', async () => {
+      // Arrange — the resolver returns an SDK function that decides from the SDK runtimeContext
+      const model = MockLanguageModel.from({
+        content: [Language.toolCall({ toolCallId: 'call-1', toolName: 'cancel', input: { orderId: 'o-1' } })],
+      });
+      const received: Array<{ input: unknown; runtimeContext: unknown }> = [];
+      const toolSet = createToolSet<typeof TOOLS, UIMessage, Record<string, unknown>, { role: string }>({
+        tools: TOOLS,
+      }).approval('cancel', () => (input, { runtimeContext }) => {
+        received.push({ input, runtimeContext });
+        return runtimeContext.role === 'admin' ? 'approved' : 'denied';
+      });
+
+      // Act
+      const result = await generateText({
+        model,
+        ...toolSet.inferTools(),
+        runtimeContext: { role: 'admin' },
+        prompt: 'Hello',
+      });
+
+      // Assert — the AI SDK calls the deferred function with the tool input and runtimeContext
+      expect(received[0]).toEqual({ input: { orderId: 'o-1' }, runtimeContext: { role: 'admin' } });
+      // Assert — deferred function approved at call time, so the tool executes
+      expect(result.toolResults.length).toBe(1);
       expect(result.toolResults[0]!.output).toEqual({ success: true });
     });
   });
@@ -760,17 +939,17 @@ describe('mutable toolset', () => {
     });
   });
 
-  describe('context', () => {
-    test('should pass context to predicates', () => {
+  describe('toolSetContext', () => {
+    test('should pass toolSetContext to predicates', () => {
       // Arrange
       const toolSet = createToolSet<typeof TOOLS, UIMessage, { isAdmin: boolean }>({
         tools: TOOLS,
         mutable: true,
       });
-      toolSet.activateWhen('cancel', ({ context }) => context?.isAdmin);
+      toolSet.activateWhen('cancel', ({ toolSetContext }) => toolSetContext?.isAdmin);
 
       // Act
-      const { activeTools } = toolSet.inferTools({ context: { isAdmin: true } });
+      const { activeTools } = toolSet.inferTools({ toolSetContext: { isAdmin: true } });
 
       // Assert
       expect(activeTools).toContain('cancel');

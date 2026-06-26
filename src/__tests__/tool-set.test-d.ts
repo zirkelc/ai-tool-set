@@ -4,26 +4,27 @@ import { describe, expectTypeOf, test } from 'vitest';
 import { z } from 'zod';
 import {
   createToolSet,
-  type ActivationInput,
+  type ApprovalResolver,
   type InferActiveTools,
   type InferAllTools,
   type InferInactiveTools,
   type InferToolSet,
+  type InferToolsInput,
   type InferUIToolSet,
   type ToolSet,
 } from '../tool-set.js';
 import { TOOLS, type MyUIMessage, plainTool, calcTool, cancelTool, editTool, archiveTool } from './fixtures.js';
 
 describe('exported types', () => {
-  describe('ActivationInput', () => {
+  describe('InferToolsInput', () => {
     test('should have messages as optional Array', () => {
-      type Input = ActivationInput<UIMessage>;
+      type Input = InferToolsInput<UIMessage>;
       expectTypeOf<Input['messages']>().toEqualTypeOf<Array<UIMessage> | undefined>();
     });
 
-    test('should have context as optional', () => {
-      type Input = ActivationInput<UIMessage, { isAdmin: boolean }>;
-      expectTypeOf<Input['context']>().toEqualTypeOf<{ isAdmin: boolean } | undefined>();
+    test('should have toolSetContext as optional', () => {
+      type Input = InferToolsInput<UIMessage, { isAdmin: boolean }>;
+      expectTypeOf<Input['toolSetContext']>().toEqualTypeOf<{ isAdmin: boolean } | undefined>();
     });
   });
 
@@ -163,11 +164,11 @@ describe('exported types', () => {
       expectTypeOf<NonNullable<Input>['messages']>().toEqualTypeOf<Array<ModelMessage> | undefined>();
     });
 
-    test('should preserve CONTEXT generic from immutable source', () => {
+    test('should preserve TOOLSET_CONTEXT generic from immutable source', () => {
       type MyCtx = { isAdmin: boolean };
       const base = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS });
       type Input = Parameters<Extract<ToolSet<typeof base>, { activateWhen: (...args: any) => any }>['inferTools']>[0];
-      expectTypeOf<NonNullable<Input>['context']>().toEqualTypeOf<MyCtx | undefined>();
+      expectTypeOf<NonNullable<Input>['toolSetContext']>().toEqualTypeOf<MyCtx | undefined>();
     });
   });
 
@@ -315,16 +316,16 @@ describe('immutable toolset', () => {
       toolSet.inferTools({ messages: [] as Array<MyUIMessage> });
     });
 
-    test('should accept context only', () => {
+    test('should accept toolSetContext only', () => {
       type MyCtx = { isAdmin: boolean };
       const toolSet = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS });
-      toolSet.inferTools({ context: { isAdmin: true } });
+      toolSet.inferTools({ toolSetContext: { isAdmin: true } });
     });
 
-    test('should accept both messages and context', () => {
+    test('should accept both messages and toolSetContext', () => {
       type MyCtx = { isAdmin: boolean };
       const toolSet = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS });
-      toolSet.inferTools({ messages: [], context: { isAdmin: true } });
+      toolSet.inferTools({ messages: [], toolSetContext: { isAdmin: true } });
     });
 
     test('should return tools and activeTools', () => {
@@ -354,24 +355,101 @@ describe('immutable toolset', () => {
     });
   });
 
-  describe('CONTEXT generic', () => {
-    test('should type predicates with custom context', () => {
+  describe('TOOLSET_CONTEXT generic', () => {
+    test('should type predicates with custom toolSetContext', () => {
       type MyCtx = { isAdmin: boolean };
       const toolSet = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS });
-      toolSet.activateWhen('cancel', ({ context }) => context?.isAdmin);
+      toolSet.activateWhen('cancel', ({ toolSetContext }) => toolSetContext?.isAdmin);
     });
 
-    test('should type inferTools with custom context', () => {
+    test('should type inferTools with custom toolSetContext', () => {
       type MyCtx = { isAdmin: boolean };
       const toolSet = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS });
-      toolSet.inferTools({ context: { isAdmin: true } });
+      toolSet.inferTools({ toolSetContext: { isAdmin: true } });
     });
 
-    test('should reject wrong context shape', () => {
+    test('should reject wrong toolSetContext shape', () => {
       type MyCtx = { isAdmin: boolean };
       const toolSet = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS });
-      // @ts-expect-error — context is missing isAdmin
-      toolSet.inferTools({ context: {} });
+      // @ts-expect-error — toolSetContext is missing isAdmin
+      toolSet.inferTools({ toolSetContext: {} });
+    });
+  });
+
+  describe('approval', () => {
+    test('should accept tool names for approve and deny', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      toolSet.approve(['cancel', 'edit']);
+      toolSet.deny(['cancel']);
+    });
+
+    test('should reject unknown tool names for approve and deny', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      // @ts-expect-error — 'unknown' is not in TOOLS
+      toolSet.approve(['unknown']);
+      // @ts-expect-error — 'unknown' is not in TOOLS
+      toolSet.deny(['unknown']);
+    });
+
+    test('should accept a constant status', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      toolSet.approval('cancel', 'user-approval');
+      toolSet.approval('cancel', { type: 'denied', reason: 'nope' });
+      toolSet.approval('cancel', undefined);
+    });
+
+    test('should type the resolver input as the inferTools input', () => {
+      type MyCtx = { isAdmin: boolean };
+      const toolSet = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS });
+      toolSet.approval('cancel', (input) => {
+        expectTypeOf(input.toolSetContext).toEqualTypeOf<MyCtx | undefined>();
+        expectTypeOf(input.messages).toEqualTypeOf<Array<UIMessage> | undefined>();
+        return 'approved';
+      });
+    });
+
+    test('should type the deferred function input per tool', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      toolSet.approval('cancel', () => (input) => {
+        expectTypeOf(input).toEqualTypeOf<{ orderId: string }>();
+        return 'approved';
+      });
+      toolSet.approval('edit', () => (input) => {
+        expectTypeOf(input).toEqualTypeOf<{ orderId: string; changes: string }>();
+        return undefined;
+      });
+    });
+
+    test('should type the deferred function runtimeContext', () => {
+      type MyRuntime = { role: string };
+      const toolSet = createToolSet<typeof TOOLS, UIMessage, Record<string, unknown>, MyRuntime>({ tools: TOOLS });
+      toolSet.approval('cancel', () => (_input, options) => {
+        expectTypeOf(options.runtimeContext).toEqualTypeOf<MyRuntime>();
+        return 'approved';
+      });
+    });
+
+    test('should accept the record form', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      toolSet.approval({ cancel: 'denied', edit: ({ toolSetContext }) => (toolSetContext ? 'approved' : undefined) });
+    });
+
+    test('should reject unknown tool names in approval', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      // @ts-expect-error — 'unknown' is not in TOOLS
+      toolSet.approval('unknown', 'denied');
+    });
+
+    test('should expose toolApproval on inferTools result', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      const result = toolSet.inferTools();
+      expectTypeOf(result).toHaveProperty('toolApproval');
+    });
+
+    test('ApprovalResolver should carry the deferred tool input type', () => {
+      type Resolver = ApprovalResolver<typeof cancelTool>;
+      type DeferredFn = Extract<ReturnType<Resolver>, (...args: any) => any>;
+      expectTypeOf<Parameters<DeferredFn>[0]>().toEqualTypeOf<{ orderId: string }>();
     });
   });
 
@@ -510,11 +588,11 @@ describe('mutable toolset', () => {
       toolSet.inferTools({ messages: [] as Array<MyUIMessage> });
     });
 
-    test('should reject wrong context shape', () => {
+    test('should reject wrong toolSetContext shape', () => {
       type MyCtx = { isAdmin: boolean };
       const toolSet = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS, mutable: true });
-      // @ts-expect-error — context is missing isAdmin
-      toolSet.inferTools({ context: {} });
+      // @ts-expect-error — toolSetContext is missing isAdmin
+      toolSet.inferTools({ toolSetContext: {} });
     });
 
     test('should return tools and activeTools', () => {
