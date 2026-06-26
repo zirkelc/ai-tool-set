@@ -4,7 +4,6 @@ import { describe, expectTypeOf, test } from 'vitest';
 import { z } from 'zod';
 import {
   createToolSet,
-  type ApprovalResolver,
   type InferActiveTools,
   type InferAllTools,
   type InferInactiveTools,
@@ -444,12 +443,6 @@ describe('immutable toolset', () => {
       const toolSet = createToolSet({ tools: TOOLS });
       const result = toolSet.inferTools();
       expectTypeOf(result).toHaveProperty('toolApproval');
-    });
-
-    test('ApprovalResolver should carry the deferred tool input type', () => {
-      type Resolver = ApprovalResolver<typeof cancelTool>;
-      type DeferredFn = Extract<ReturnType<Resolver>, (...args: any) => any>;
-      expectTypeOf<Parameters<DeferredFn>[0]>().toEqualTypeOf<{ orderId: string }>();
     });
   });
 

@@ -5,7 +5,7 @@
   <img src="assets/logo-light.png" alt="ai-tool-set logo" width="400" />
 </picture>
 
-<p align="center">Conditional tool activation for the AI SDK, fully type-safe</p>
+<p align="center">Conditional tool activations and approvals for the AI SDK, fully type-safe</p>
 <p align="center">
   <a href="https://www.npmjs.com/package/ai-tool-set" alt="ai-tool-set"><img src="https://img.shields.io/npm/dt/ai-tool-set?label=ai-tool-set"></a> <a href="https://github.com/zirkelc/ai-tool-set/actions/workflows/ci.yml" alt="CI"><img src="https://img.shields.io/github/actions/workflow/status/zirkelc/ai-tool-set/ci.yml?branch=main"></a>
 </p>
@@ -582,27 +582,6 @@ activateTools(toolSet);
 
 const mutableToolSet = toolSet.clone({ mutable: true });
 activateTools(mutableToolSet);
-```
-
-### `ApprovalResolver`
-
-The function form of an approval entry. Runs inside `inferTools()` with `{ messages, toolSetContext }` and returns either a final `ToolApprovalStatus` or a `SingleToolApprovalFunction` (from `ai`) deferred to tool-call time. Generic over the tool, `MESSAGE`, `TOOLSET_CONTEXT`, and the AI SDK `RUNTIME_CONTEXT` (defaults to `unknown`):
-
-```ts
-import type { ApprovalResolver } from 'ai-tool-set';
-
-const resolver: ApprovalResolver<typeof cancelOrderTool> = ({ toolSetContext }) =>
-  toolSetContext?.isAdmin ? 'approved' : 'user-approval';
-```
-
-### `ApprovalEntry`
-
-A tool's approval value accepted by `.approval()`: a constant `ToolApprovalStatus` or an `ApprovalResolver`.
-
-```ts
-import type { ApprovalEntry } from 'ai-tool-set';
-
-const entry: ApprovalEntry<typeof cancelOrderTool> = 'user-approval';
 ```
 
 ### `InferToolSet`

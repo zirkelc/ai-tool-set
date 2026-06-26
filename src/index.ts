@@ -1,7 +1,5 @@
 export {
   createToolSet,
-  type ApprovalEntry,
-  type ApprovalResolver,
   type InferActiveTools,
   type InferAllTools,
   type InferInactiveTools,

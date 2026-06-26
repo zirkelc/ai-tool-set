@@ -92,7 +92,7 @@ type StoredActivationEntry = {
  *
  * @typeParam RUNTIME_CONTEXT — the AI SDK runtime context type for the deferred function (defaults to `unknown`).
  */
-export type ApprovalResolver<
+type ApprovalResolver<
   TOOL extends Tool,
   MESSAGE extends MessageType = UIMessage,
   TOOLSET_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
@@ -102,7 +102,7 @@ export type ApprovalResolver<
 ) => ToolApprovalStatus | SingleToolApprovalFunction<InferToolInput<TOOL>, InferToolContext<TOOL>, RUNTIME_CONTEXT>;
 
 /** An approval entry for a tool — a constant status or a resolver. */
-export type ApprovalEntry<
+type ApprovalEntry<
   TOOL extends Tool,
   MESSAGE extends MessageType = UIMessage,
   TOOLSET_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
