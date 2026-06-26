@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.0.0](https://github.com/zirkelc/ai-tool-set/compare/v1.2.3...v2.0.0) (2026-06-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* requires AI SDK v7 (ai@^7) and renames the runtime context to toolSetContext.
+
+### Features
+
+* ship AI SDK v7 support with conditional tool approval ([544ddcd](https://github.com/zirkelc/ai-tool-set/commit/544ddcd4a126a7341ca9d743d55437c462b8deee))
+
+
+### Code Refactoring
+
+* drop ApprovalResolver/ApprovalEntry from public exports ([9e99a47](https://github.com/zirkelc/ai-tool-set/commit/9e99a47d64b0a56841eda4ff4e5b70ecd000e544))
+
+
+### Documentation
+
+* refresh logo and banner assets ([ece2094](https://github.com/zirkelc/ai-tool-set/commit/ece209439f6b22a7d120fc763bc7d18630823a2b))
+
 ## [1.2.3](https://github.com/zirkelc/ai-tool-set/compare/v1.2.2...v1.2.3) (2026-06-26)
 
 
