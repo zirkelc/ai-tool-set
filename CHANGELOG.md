@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.3](https://github.com/zirkelc/ai-tool-set/compare/v1.2.2...v1.2.3) (2026-06-26)
+
+
+### Miscellaneous Chores
+
+* add FUNDING.yml sponsor button ([ed4dbdb](https://github.com/zirkelc/ai-tool-set/commit/ed4dbdb0ea359a1e6f38dc66f7c99e4bf13231e9))
+
 ## [1.2.2](https://github.com/zirkelc/ai-tool-set/compare/v1.2.1...v1.2.2) (2026-06-23)
 
 
