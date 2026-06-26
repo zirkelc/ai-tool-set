@@ -8,37 +8,42 @@
       <stop offset="0" stop-color="#34d399"/>
       <stop offset="1" stop-color="#a3e635"/>
     </linearGradient>
-    <radialGradient id="glow" cx="0.5" cy="0.36" r="0.6">
+    <radialGradient id="glow" cx="0.5" cy="0.34" r="0.62">
       <stop offset="0" stop-color="#16241b"/>
-      <stop offset="1" stop-color="#0d1117"/>
+      <stop offset="1" stop-color="#0b0e14"/>
     </radialGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#34d399" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#34d399" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#34d399" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#a3e635" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#34d399" stop-opacity="0"/>
+    </linearGradient>
   </defs>
 
-  <!-- background -->
-  <rect width="1280" height="640" fill="#0d1117"/>
+  <rect width="1280" height="640" fill="#0b0e14"/>
   <rect width="1280" height="640" fill="url(#glow)"/>
 
   <!-- ===== { tools } motif (scaled) ===== -->
-  <g transform="translate(208,93) scale(1.2)">
-    <!-- braces -->
+  <g transform="translate(208,86) scale(1.22)">
     <path d="M170 40 Q150 40 150 68 L150 96 Q150 110 130 110 Q150 110 150 124 L150 152 Q150 180 170 180"
           fill="none" stroke="url(#acc)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
     <path d="M550 40 Q570 40 570 68 L570 96 Q570 110 590 110 Q570 110 570 124 L570 152 Q570 180 550 180"
           fill="none" stroke="url(#acc)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
 
-    <!-- hammer (grey = deactivated) -->
     <g transform="translate(250,110) rotate(-20)" fill="#6b7482">
       <rect x="-7" y="-18" width="14" height="62" rx="7"/>
       <path d="M-34 -40 Q-40 -28 -30 -22 L-8 -28 L-8 -20 L8 -20 L8 -28 L20 -28 Q30 -28 30 -38 Q30 -48 20 -48 L-8 -48 L-26 -52 Q-36 -50 -34 -40 Z"/>
     </g>
 
-    <!-- wrench (mid-tone) -->
     <g transform="translate(360,110) rotate(-20)" fill="#6ee7b7">
       <rect x="-6" y="-12" width="12" height="56" rx="6"/>
       <path d="M-18 -44 L-18 -26 Q-18 -16 -8 -16 L8 -16 Q18 -16 18 -26 L18 -44 L8 -44 L8 -30 Q8 -26 4 -26 L-4 -26 Q-8 -26 -8 -30 L-8 -44 Z"/>
     </g>
 
-    <!-- gear (white = active) -->
+    <circle cx="470" cy="110" r="58" fill="url(#halo)"/>
     <g transform="translate(470,110)" stroke="url(#acc)" fill="none" stroke-linecap="round">
       <circle r="16" stroke-width="11"/>
       <g stroke-width="10">
@@ -55,12 +60,15 @@
   </g>
 
   <!-- ===== WORDMARK ===== -->
-  <text x="640" y="430" text-anchor="middle"
-        font-family="'JetBrains Mono', monospace" font-weight="700" font-size="76"
-        letter-spacing="-2" fill="#e6eaf0">ai-<tspan fill="url(#accText)">tool</tspan>-set</text>
+  <text x="640" y="432" text-anchor="middle"
+        font-family="'JetBrains Mono', monospace" font-weight="700" font-size="78"
+        letter-spacing="-2" fill="#e9edf3">ai-<tspan fill="url(#accText)">tool</tspan>-set</text>
+
+  <!-- accent rule -->
+  <rect x="500" y="462" width="280" height="3" rx="1.5" fill="url(#rule)"/>
 
   <!-- ===== TAGLINE ===== -->
-  <text x="640" y="491" text-anchor="middle"
-        font-family="'JetBrains Mono', monospace" font-weight="400" font-size="25"
-        letter-spacing="0" fill="#9aa4b2">Conditional tool activation for the AI SDK, fully type-safe</text>
+  <text x="640" y="510" text-anchor="middle"
+        font-family="'JetBrains Mono', monospace" font-weight="400" font-size="22"
+        letter-spacing="0.5" fill="#9aa4b2">Conditional tool activations and approvals for the AI SDK, fully type-safe</text>
 </svg>
