@@ -202,7 +202,7 @@ const toolSet = createToolSet({ tools })
 ### Tool Approval
 
 > [!NOTE]
-> Tool approval requires AI SDK v7 (`ai-tool-set@2.x`).
+> Tool approval requires AI SDK v7 and `ai-tool-set@2.x`
 
 The AI SDK can gate tool execution with [`toolApproval`](https://ai-sdk.dev/docs/agents/tool-approvals). `.inferTools()` resolves a `toolApproval` record alongside `tools` and `activeTools`, so a single tool set drives both activation and approval.
 
