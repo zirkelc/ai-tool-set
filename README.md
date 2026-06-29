@@ -95,12 +95,13 @@ const result = await generateText({
 
 ### Conditional Activation
 
-Use `.activateWhen()` and `.deactivateWhen()` to conditionally control tools based on messages and context. The predicate receives an input with `messages` and `toolSetContext` (both can be `undefined` if not provided to `inferTools`) and should return a boolean (or undefined) to determine whether the tool should be activated/deactivated.
+Use `.activateWhen()` and `.deactivateWhen()` to conditionally control tools based on messages, step history, and context. The predicate receives an input with `messages`, `steps`, and `toolSetContext` (all can be `undefined` if not provided to `inferTools`) and should return a boolean (or undefined) to determine whether the tool should be activated/deactivated.
 
 ```typescript
-// Conditional activation with a predicate that checks for unfulfilled orders in the messages
 const toolSet = createToolSet({ tools })
+  // toolSetContext: activate list_orders for authenticated users
   .activateWhen('list_orders', ({ toolSetContext }) => toolSetContext?.isAuthenticated)
+  // messages: activate cancel_order when the conversation has unfulfilled orders
   .activateWhen('cancel_order', ({ messages }) =>
     messages?.some((m) =>
       m.parts.some(
@@ -110,10 +111,27 @@ const toolSet = createToolSet({ tools })
           p.output.orders?.some((order) => order.status !== 'fulfilled'),
       ),
     ),
+  )
+  // steps: deactivate search once it has been called in this run
+  .deactivateWhen('search', ({ steps }) =>
+    steps?.some((s) => s.staticToolCalls.some((c) => c.toolName === 'search')),
   );
 ```
 
-Call `.inferTools()` with messages and/or `toolSetContext` to evaluate activation predicates and resolve `activeTools`:
+You can also activate or deactivate multiple tools at once using the object form:
+
+```typescript
+const toolSet = createToolSet({ tools })
+  .activateWhen({
+    list_orders: ({ toolSetContext }) => { /* ... */ },
+    cancel_order: ({ messages }) => { /* ... */ },
+  })
+  .deactivateWhen({
+    search: ({ steps }) => { /* ... */ },
+  });
+```
+
+Call `.inferTools()` with `messages` and/or `toolSetContext` to evaluate activation predicates and resolve `activeTools`:
 
 ```typescript
 const messages = [
@@ -148,12 +166,23 @@ const { tools, activeTools } = toolSet.inferTools({ messages, toolSetContext });
 const result = await generateText({ model, tools, activeTools, messages });
 ```
 
-You can also activate multiple tools at once:
+In a multi-step run, you can call `.inferTools()` inside `prepareStep()` to re-evaluate active tools after each step. Here you also have access to the `steps` array, which contains the completed steps of the current run:
 
 ```typescript
-const toolSet = createToolSet({ tools }).activateWhen({
-  list_orders: ({ toolSetContext }) => toolSetContext?.isAuthenticated,
-  cancel_order: ({ messages }) => hasUnfulfilledOrders(messages),
+import { generateText, stepCountIs } from 'ai';
+
+const { tools } = toolSet;
+
+const result = await generateText({
+  model,
+  tools,
+  stopWhen: stepCountIs(10),
+  prompt: 'Find my orders and cancel the unfulfilled one',
+  prepareStep: ({ steps }) => {
+    // Resolve activeTools from the steps completed so far
+    const { activeTools } = toolSet.inferTools({ steps });
+    return { activeTools };
+  },
 });
 ```
 
@@ -224,7 +253,7 @@ const result = await generateText({ model, tools, activeTools, toolApproval, pro
 
 A tool with no approval entry defaults to `'not-applicable'` (runs without approval). Approval resolution follows the same **last-call wins** rule as activation.
 
-An `.approval()` entry is either a constant [`ToolApprovalStatus`](https://ai-sdk.dev/docs/agents/tool-approvals) (`'approved'`, `'denied'`, `'user-approval'`, `'not-applicable'`) or a **resolver**. The resolver runs inside `.inferTools()` with your toolset values (`{ messages, toolSetContext }`) and returns either:
+An `.approval()` entry is either a constant [`ToolApprovalStatus`](https://ai-sdk.dev/docs/agents/tool-approvals) (`'approved'`, `'denied'`, `'user-approval'`, `'not-applicable'`) or a **resolver**. The resolver runs inside `.inferTools()` with your toolset values (`{ messages, steps, toolSetContext }`) and returns either:
 
 - a final status decided right there, or
 - a [`SingleToolApprovalFunction`](https://ai-sdk.dev/docs/agents/tool-approvals) deferred to tool-call time, which the AI SDK invokes with the tool input and its own runtime values (`runtimeContext`, model messages, tool context).
@@ -345,9 +374,9 @@ type MyToolSet = InferUIToolSet<typeof toolSet>;
 type MyUIMessage = UIMessage<unknown, any, MyToolSet>;
 ```
 
-### Custom UIMessage
+### UIMessage vs ModelMessage
 
-If you already have a custom `UIMessage` type, you can pass it as `MESSAGE` generic to `createToolSet()` and it will be used in predicates and `inferTools`:
+The second generic `MESSAGE` of `createToolSet()` defaults to `UIMessage` and types the messages passed to predicates and `inferTools()`. If you already have a custom `UIMessage` type, you can pass it to make messages fully typed:
 
 ```typescript
 import { myTools } from './my-tools.js';
@@ -361,6 +390,31 @@ const toolSet = createToolSet<typeof myTools, MyUIMessage>({ tools: myTools }).a
 );
 
 const { tools, activeTools } = toolSet.inferTools({ messages });
+```
+
+If you rather work with model messages than UI messages, you can pass `ModelMessage` instead. This is useful if you want to call `inferTools()` inside the `prepareStep()` callback, where you only have access to model messages:
+
+```typescript
+import { myTools } from './my-tools.js';
+import { ModelMessage } from 'ai';
+
+const toolSet = createToolSet<typeof myTools, ModelMessage>({ tools: myTools }).activateWhen(
+  'cancel_order',
+  ({ messages }) => hasUnfulfilledOrders(messages),
+  // ~~~~~~~~
+  // Messages are now typed as Array<ModelMessage> | undefined
+);
+
+const result = await generateText({
+  model,
+  messages: await convertToModelMessages(messages),
+  prepareStep: ({ messages }) => {
+    //            ~~~~~~~~
+    //            The available model messages for each step
+    const { activeTools } = toolSet.inferTools({ messages });
+    return { activeTools };
+  },
+});
 ```
 
 ### Custom Context
@@ -388,7 +442,7 @@ const { tools, activeTools } = toolSet.inferTools({
 });
 ```
 
-A fourth `RUNTIME_CONTEXT` generic types the AI SDK `runtimeContext` that a deferred approval function receives at tool-call time (defaults to `unknown`). It is separate from `toolSetContext` and is passed to `generateText()` as a plain value:
+A fourth `RUNTIME_CONTEXT` generic types the AI SDK `runtimeContext` (defaults to `Record<string, unknown>`). It types both the `runtimeContext` a deferred approval function receives at tool-call time and the `runtimeContext` on each `step` in predicates. It is separate from `toolSetContext` and is passed to `generateText()` as a plain value:
 
 ```typescript
 type RuntimeContext = { region: string };
@@ -455,7 +509,7 @@ toolSet.deactivate(['search']);
 
 #### `.activateWhen(name, predicate)` / `.activateWhen(predicates)`
 
-Conditionally activate tools. The predicate receives `{ messages, toolSetContext }` and returns `true` to activate. Both `messages` and `toolSetContext` can be `undefined` if not provided to `inferTools`. Returning `undefined` is treated as `false`.
+Conditionally activate tools. The predicate receives `{ messages, steps, toolSetContext }` and returns `true` to activate. All fields can be `undefined` if not provided to `inferTools`. Returning `undefined` is treated as `false`.
 
 ```ts
 toolSet.activateWhen('cancel_order', ({ messages }) => messages?.some((m) => hasOrders(m)));
@@ -468,7 +522,7 @@ toolSet.activateWhen({
 
 #### `.deactivateWhen(name, predicate)` / `.deactivateWhen(predicates)`
 
-Conditionally deactivate tools. The predicate receives `{ messages, toolSetContext }` and returns `true` to deactivate. Both `messages` and `toolSetContext` can be `undefined` if not provided to `inferTools`. Returning `undefined` is treated as `false` (tool stays active).
+Conditionally deactivate tools. The predicate receives `{ messages, steps, toolSetContext }` and returns `true` to deactivate. All fields can be `undefined` if not provided to `inferTools`. Returning `undefined` is treated as `false` (tool stays active).
 
 ```ts
 toolSet.deactivateWhen('search', ({ messages }) => messages && messages.length > 10);
@@ -492,7 +546,7 @@ toolSet.deny(['cancel_order']);
 
 #### `.approval(name, entry)` / `.approval(entries)`
 
-Set a tool's approval to a constant `ToolApprovalStatus` or a resolver. A resolver receives `{ messages, toolSetContext }` and returns either a final status or a `SingleToolApprovalFunction` that the AI SDK calls at tool-call time. Last-call wins.
+Set a tool's approval to a constant `ToolApprovalStatus` or a resolver. A resolver receives `{ messages, steps, toolSetContext }` and returns either a final status or a `SingleToolApprovalFunction` that the AI SDK calls at tool-call time. Last-call wins.
 
 ```ts
 // Constant status
@@ -522,6 +576,7 @@ Evaluate all predicates and approval resolvers and return `{ tools, activeTools,
 
 - `input` (optional):
   - `messages` (optional), the current conversation messages
+  - `steps` (optional), the completed steps of the current run (the `StepResult` array from `prepareStep`)
   - `toolSetContext` (optional), arbitrary values passed to predicates and approval resolvers
 
 ```ts
@@ -533,6 +588,9 @@ const { tools, activeTools, toolApproval } = toolSet.inferTools({ messages });
 
 // With toolSetContext
 const { tools, activeTools, toolApproval } = toolSet.inferTools({ toolSetContext: { isAdmin: true } });
+
+// With steps (e.g. inside prepareStep)
+const { tools, activeTools, toolApproval } = toolSet.inferTools({ steps });
 
 // With both
 const { tools, activeTools, toolApproval } = toolSet.inferTools({ messages, toolSetContext });
@@ -553,13 +611,17 @@ const immutableClone = toolSet.clone();
 
 ### `InferToolsInput`
 
-Input passed to `inferTools()`, activation predicates, and approval resolvers. Generic over `MESSAGE` and `TOOLSET_CONTEXT`. Both `messages` and `toolSetContext` are optional since they may not be provided to `inferTools`:
+Input passed to `inferTools()`, activation predicates, and approval resolvers. Generic over `TOOLS`, `MESSAGE`, `TOOLSET_CONTEXT`, and `RUNTIME_CONTEXT`. All fields are optional since they may not be provided to `inferTools`. `steps` is inferred from `TOOLS` (and carries `RUNTIME_CONTEXT` on each step):
 
 ```ts
 import type { InferToolsInput } from 'ai-tool-set';
 
-type MyInput = InferToolsInput<MyUIMessage, { isAdmin: boolean }>;
-// { messages?: Array<MyUIMessage>; toolSetContext?: { isAdmin: boolean } }
+type MyInput = InferToolsInput<typeof tools, MyUIMessage, { isAdmin: boolean }>;
+// {
+//   messages?: Array<MyUIMessage>;
+//   steps?: Array<StepResult<typeof tools>>;
+//   toolSetContext?: { isAdmin: boolean };
+// }
 ```
 
 ### `ToolSet`

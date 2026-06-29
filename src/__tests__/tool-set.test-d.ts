@@ -1,4 +1,4 @@
-import type { InferUITool, ModelMessage, UIMessage } from 'ai';
+import type { InferUITool, ModelMessage, StepResult, UIMessage } from 'ai';
 import { tool } from 'ai';
 import { describe, expectTypeOf, test } from 'vitest';
 import { z } from 'zod';
@@ -17,12 +17,41 @@ import { TOOLS, type MyUIMessage, plainTool, calcTool, cancelTool, editTool, arc
 describe('exported types', () => {
   describe('InferToolsInput', () => {
     test('should have messages as optional Array', () => {
-      type Input = InferToolsInput<UIMessage>;
+      type Input = InferToolsInput<typeof TOOLS, UIMessage>;
       expectTypeOf<Input['messages']>().toEqualTypeOf<Array<UIMessage> | undefined>();
     });
 
+    test('should have steps inferred from the tool set', () => {
+      type Input = InferToolsInput<typeof TOOLS>;
+      expectTypeOf<Input['steps']>().toEqualTypeOf<Array<StepResult<typeof TOOLS>> | undefined>();
+    });
+
+    /**
+     * `toolCalls[n].toolName` is `string`, NOT the tool-name union:
+     * `TypedToolCall = StaticToolCall | DynamicToolCall`, and the dynamic branch's
+     * `toolName` is `string`, which widens the union. Use `staticToolCalls` for the
+     * narrowed declared names (next test).
+     */
+    test('should type steps toolCalls toolName as string', () => {
+      type Step = NonNullable<InferToolsInput<typeof TOOLS>['steps']>[number];
+      expectTypeOf<Step['toolCalls'][number]['toolName']>().toEqualTypeOf<string>();
+    });
+
+    test('should narrow steps staticToolCalls toolName to the tool-name union', () => {
+      type Step = NonNullable<InferToolsInput<typeof TOOLS>['steps']>[number];
+      expectTypeOf<Step['staticToolCalls'][number]['toolName']>().toEqualTypeOf<
+        'plain' | 'calc' | 'cancel' | 'edit' | 'archive'
+      >();
+    });
+
+    test('should thread the runtime context into steps', () => {
+      type Input = InferToolsInput<typeof TOOLS, UIMessage, Record<string, unknown>, { userId: string }>;
+      type Step = NonNullable<Input['steps']>[number];
+      expectTypeOf<Step['runtimeContext']>().toEqualTypeOf<{ userId: string }>();
+    });
+
     test('should have toolSetContext as optional', () => {
-      type Input = InferToolsInput<UIMessage, { isAdmin: boolean }>;
+      type Input = InferToolsInput<typeof TOOLS, UIMessage, { isAdmin: boolean }>;
       expectTypeOf<Input['toolSetContext']>().toEqualTypeOf<{ isAdmin: boolean } | undefined>();
     });
   });
@@ -300,6 +329,16 @@ describe('immutable toolset', () => {
       toolSet.activateWhen('cancel', ({ messages }) => messages?.some((m) => m.parts.length > 0));
       toolSet.deactivateWhen('plain', ({ messages }) => messages?.some((m) => m.parts.length > 0));
     });
+
+    test('should type steps in predicates', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      toolSet.activateWhen('cancel', ({ steps }) =>
+        steps?.some((s) => s.staticToolCalls.some((c) => c.toolName === 'cancel')),
+      );
+      toolSet.deactivateWhen('plain', ({ steps }) =>
+        steps?.some((s) => s.staticToolCalls.some((c) => c.toolName === 'plain')),
+      );
+    });
   });
 
   describe('inferTools', () => {
@@ -319,6 +358,11 @@ describe('immutable toolset', () => {
       type MyCtx = { isAdmin: boolean };
       const toolSet = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS });
       toolSet.inferTools({ toolSetContext: { isAdmin: true } });
+    });
+
+    test('should accept steps only', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      toolSet.inferTools({ steps: [] as Array<StepResult<typeof TOOLS>> });
     });
 
     test('should accept both messages and toolSetContext', () => {
@@ -372,6 +416,14 @@ describe('immutable toolset', () => {
       const toolSet = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS });
       // @ts-expect-error — toolSetContext is missing isAdmin
       toolSet.inferTools({ toolSetContext: {} });
+    });
+  });
+
+  describe('RUNTIME_CONTEXT generic', () => {
+    test('should type runtimeContext on steps in predicates', () => {
+      type MyCtx = { isAdmin: boolean };
+      const toolSet = createToolSet<typeof TOOLS, UIMessage, Record<string, unknown>, MyCtx>({ tools: TOOLS });
+      toolSet.activateWhen('cancel', ({ steps }) => steps?.some((s) => s.runtimeContext.isAdmin));
     });
   });
 

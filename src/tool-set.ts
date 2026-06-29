@@ -3,6 +3,7 @@ import type {
   InferUITool,
   ModelMessage,
   SingleToolApprovalFunction,
+  StepResult,
   Tool,
   ToolApprovalStatus,
   UIMessage,
@@ -63,22 +64,27 @@ export type InferAllTools<TOOLSET extends AnyToolSet> = keyof InferToolSet<TOOLS
  * returned approval function receives — see {@link ApprovalResolver}.
  */
 export type InferToolsInput<
+  TOOLS extends ToolRecord = ToolRecord,
   MESSAGE extends MessageType = UIMessage,
   TOOLSET_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
+  RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
 > = {
   messages?: Array<MESSAGE>;
+  steps?: Array<StepResult<TOOLS, RUNTIME_CONTEXT>>;
   toolSetContext?: TOOLSET_CONTEXT;
 };
 
 /** Activation predicate — returns true if tool should be active. Undefined is treated as false. */
 type ActivationPredicate<
+  TOOLS extends ToolRecord = ToolRecord,
   MESSAGE extends MessageType = UIMessage,
   TOOLSET_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
-> = (input: InferToolsInput<MESSAGE, TOOLSET_CONTEXT>) => boolean | undefined;
+  RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
+> = (input: InferToolsInput<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>) => boolean | undefined;
 
 type StoredActivationEntry = {
   toolName: string;
-  resolve: (input: InferToolsInput<any, any>) => boolean | undefined;
+  resolve: (input: InferToolsInput<any, any, any, any>) => boolean | undefined;
 };
 
 /**
@@ -94,23 +100,25 @@ type StoredActivationEntry = {
  */
 type ApprovalResolver<
   TOOL extends Tool,
+  TOOLS extends ToolRecord = ToolRecord,
   MESSAGE extends MessageType = UIMessage,
   TOOLSET_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
-  RUNTIME_CONTEXT = unknown,
+  RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
 > = (
-  input: InferToolsInput<MESSAGE, TOOLSET_CONTEXT>,
+  input: InferToolsInput<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
 ) => ToolApprovalStatus | SingleToolApprovalFunction<InferToolInput<TOOL>, InferToolContext<TOOL>, RUNTIME_CONTEXT>;
 
 /** An approval entry for a tool — a constant status or a resolver. */
 type ApprovalEntry<
   TOOL extends Tool,
+  TOOLS extends ToolRecord = ToolRecord,
   MESSAGE extends MessageType = UIMessage,
   TOOLSET_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
-  RUNTIME_CONTEXT = unknown,
-> = ToolApprovalStatus | ApprovalResolver<TOOL, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>;
+  RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
+> = ToolApprovalStatus | ApprovalResolver<TOOL, TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>;
 
 /** Any approval entry value, for internal storage. */
-type AnyApprovalEntry = ToolApprovalStatus | ApprovalResolver<any, any, any, any>;
+type AnyApprovalEntry = ToolApprovalStatus | ApprovalResolver<any, any, any, any, any>;
 
 type StoredApprovalEntry = {
   toolName: string;
@@ -118,14 +126,20 @@ type StoredApprovalEntry = {
 };
 
 /** The resolved `toolApproval` record, ready to pass to `generateText`/`streamText`/`Agent`. */
-type ResolvedToolApproval<TOOLS extends ToolRecord, RUNTIME_CONTEXT = unknown> = {
+type ResolvedToolApproval<
+  TOOLS extends ToolRecord,
+  RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
+> = {
   [K in keyof TOOLS]?:
     | ToolApprovalStatus
     | SingleToolApprovalFunction<InferToolInput<TOOLS[K]>, InferToolContext<TOOLS[K]>, RUNTIME_CONTEXT>;
 };
 
 /** Resolved tools, active tool names, and approval record returned by `inferTools()`. */
-type ResolvedToolSet<TOOLS extends ToolRecord, RUNTIME_CONTEXT = unknown> = {
+type ResolvedToolSet<
+  TOOLS extends ToolRecord,
+  RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
+> = {
   tools: TOOLS;
   activeTools: Array<keyof TOOLS & string>;
   toolApproval: ResolvedToolApproval<TOOLS, RUNTIME_CONTEXT>;
@@ -176,8 +190,8 @@ export type ToolSet<TOOLSET extends AnyToolSet> =
       : never;
 
 const toActivationEntries = (
-  nameOrPredicates: string | Partial<Record<string, ActivationPredicate<any, any>>>,
-  predicate?: ActivationPredicate<any, any>,
+  nameOrPredicates: string | Partial<Record<string, ActivationPredicate<any, any, any, any>>>,
+  predicate?: ActivationPredicate<any, any, any, any>,
 ): Array<StoredActivationEntry> => {
   if (typeof nameOrPredicates === 'string') {
     return [{ toolName: nameOrPredicates, resolve: predicate! }];
@@ -210,7 +224,7 @@ class ToolSetState<
   TOOLS extends ToolRecord,
   MESSAGE extends MessageType = UIMessage,
   TOOLSET_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
-  RUNTIME_CONTEXT = unknown,
+  RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
 > {
   readonly #tools: TOOLS;
   readonly #activationEntries: Array<StoredActivationEntry>;
@@ -242,8 +256,10 @@ class ToolSetState<
   }
 
   activateWhen(
-    nameOrPredicates: string | Partial<Record<string, ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>>>,
-    predicate?: ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>,
+    nameOrPredicates:
+      | string
+      | Partial<Record<string, ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>>>,
+    predicate?: ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
   ): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
     return new ToolSetState(
       this.#tools,
@@ -253,12 +269,14 @@ class ToolSetState<
   }
 
   deactivateWhen(
-    nameOrPredicates: string | Partial<Record<string, ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>>>,
-    predicate?: ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>,
+    nameOrPredicates:
+      | string
+      | Partial<Record<string, ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>>>,
+    predicate?: ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
   ): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
     const newEntries = toActivationEntries(nameOrPredicates, predicate).map((e) => ({
       ...e,
-      resolve: (input: InferToolsInput<any, any>) => !e.resolve(input),
+      resolve: (input: InferToolsInput<any, any, any, any>) => !e.resolve(input),
     }));
     return new ToolSetState(this.#tools, [...this.#activationEntries, ...newEntries], this.#approvalEntries);
   }
@@ -284,7 +302,9 @@ class ToolSetState<
   }
 
   /** Evaluate all predicates and resolvers with the provided input. */
-  inferTools(input?: InferToolsInput<MESSAGE, TOOLSET_CONTEXT>): ResolvedToolSet<TOOLS, RUNTIME_CONTEXT> {
+  inferTools(
+    input?: InferToolsInput<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
+  ): ResolvedToolSet<TOOLS, RUNTIME_CONTEXT> {
     const allNames = Object.keys(this.#tools) as Array<keyof TOOLS & string>;
     const activeTools = allNames.filter((name) => {
       const lastEntry = this.#activationEntries.findLast((e) => e.toolName === name);
@@ -321,7 +341,7 @@ class ImmutableToolSet<
   TOOLS extends ToolRecord,
   MESSAGE extends MessageType = UIMessage,
   TOOLSET_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
-  RUNTIME_CONTEXT = unknown,
+  RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
   ACTIVATED extends string = never,
   DEACTIVATED extends string = never,
 > {
@@ -369,14 +389,16 @@ class ImmutableToolSet<
    */
   activateWhen<NAME extends keyof TOOLS & string>(
     name: NAME,
-    predicate: ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>,
+    predicate: ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
   ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, Exclude<ACTIVATED, NAME>, DEACTIVATED | NAME>;
   activateWhen<NAMES extends keyof TOOLS & string>(
-    predicates: Partial<Record<NAMES, ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>>>,
+    predicates: Partial<Record<NAMES, ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>>>,
   ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, Exclude<ACTIVATED, NAMES>, DEACTIVATED | NAMES>;
   activateWhen(
-    nameOrPredicates: string | Partial<Record<string, ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>>>,
-    predicate?: ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>,
+    nameOrPredicates:
+      | string
+      | Partial<Record<string, ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>>>,
+    predicate?: ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
   ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED> {
     return new ImmutableToolSet(this.#state.activateWhen(nameOrPredicates, predicate));
   }
@@ -387,14 +409,16 @@ class ImmutableToolSet<
    */
   deactivateWhen<NAME extends keyof TOOLS & string>(
     name: NAME,
-    predicate: ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>,
+    predicate: ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
   ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED | NAME, Exclude<DEACTIVATED, NAME>>;
   deactivateWhen<NAMES extends keyof TOOLS & string>(
-    predicates: Partial<Record<NAMES, ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>>>,
+    predicates: Partial<Record<NAMES, ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>>>,
   ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED | NAMES, Exclude<DEACTIVATED, NAMES>>;
   deactivateWhen(
-    nameOrPredicates: string | Partial<Record<string, ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>>>,
-    predicate?: ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>,
+    nameOrPredicates:
+      | string
+      | Partial<Record<string, ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>>>,
+    predicate?: ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
   ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED> {
     return new ImmutableToolSet(this.#state.deactivateWhen(nameOrPredicates, predicate));
   }
@@ -420,10 +444,10 @@ class ImmutableToolSet<
    */
   approval<NAME extends keyof TOOLS & string>(
     name: NAME,
-    entry: ApprovalEntry<TOOLS[NAME], MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
+    entry: ApprovalEntry<TOOLS[NAME], TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
   ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED>;
   approval(entries: {
-    [K in keyof TOOLS & string]?: ApprovalEntry<TOOLS[K], MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>;
+    [K in keyof TOOLS & string]?: ApprovalEntry<TOOLS[K], TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>;
   }): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED>;
   approval(
     nameOrEntries: string | Partial<Record<string, AnyApprovalEntry>>,
@@ -433,7 +457,9 @@ class ImmutableToolSet<
   }
 
   /** Evaluate all predicates and resolvers. Returns resolved `{ tools, activeTools, toolApproval }`. */
-  inferTools(input?: InferToolsInput<MESSAGE, TOOLSET_CONTEXT>): ResolvedToolSet<TOOLS, RUNTIME_CONTEXT> {
+  inferTools(
+    input?: InferToolsInput<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
+  ): ResolvedToolSet<TOOLS, RUNTIME_CONTEXT> {
     return this.#state.inferTools(input);
   }
 
@@ -461,7 +487,7 @@ class MutableToolSet<
   TOOLS extends ToolRecord,
   MESSAGE extends MessageType = UIMessage,
   TOOLSET_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
-  RUNTIME_CONTEXT = unknown,
+  RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
 > {
   #state: ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>;
 
@@ -488,11 +514,20 @@ class MutableToolSet<
   /**
    * Conditionally activate a tool — inactive by default, becomes active when predicate returns true.
    */
-  activateWhen(name: keyof TOOLS & string, predicate: ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>): this;
-  activateWhen(predicates: Partial<Record<keyof TOOLS & string, ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>>>): this;
   activateWhen(
-    nameOrPredicates: string | Partial<Record<string, ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>>>,
-    predicate?: ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>,
+    name: keyof TOOLS & string,
+    predicate: ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
+  ): this;
+  activateWhen(
+    predicates: Partial<
+      Record<keyof TOOLS & string, ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>>
+    >,
+  ): this;
+  activateWhen(
+    nameOrPredicates:
+      | string
+      | Partial<Record<string, ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>>>,
+    predicate?: ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
   ): this {
     this.#state = this.#state.activateWhen(nameOrPredicates, predicate);
     return this;
@@ -501,13 +536,20 @@ class MutableToolSet<
   /**
    * Conditionally deactivate a tool — active by default, becomes inactive when predicate returns true.
    */
-  deactivateWhen(name: keyof TOOLS & string, predicate: ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>): this;
   deactivateWhen(
-    predicates: Partial<Record<keyof TOOLS & string, ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>>>,
+    name: keyof TOOLS & string,
+    predicate: ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
   ): this;
   deactivateWhen(
-    nameOrPredicates: string | Partial<Record<string, ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>>>,
-    predicate?: ActivationPredicate<MESSAGE, TOOLSET_CONTEXT>,
+    predicates: Partial<
+      Record<keyof TOOLS & string, ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>>
+    >,
+  ): this;
+  deactivateWhen(
+    nameOrPredicates:
+      | string
+      | Partial<Record<string, ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>>>,
+    predicate?: ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
   ): this {
     this.#state = this.#state.deactivateWhen(nameOrPredicates, predicate);
     return this;
@@ -530,10 +572,10 @@ class MutableToolSet<
    */
   approval<NAME extends keyof TOOLS & string>(
     name: NAME,
-    entry: ApprovalEntry<TOOLS[NAME], MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
+    entry: ApprovalEntry<TOOLS[NAME], TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
   ): this;
   approval(entries: {
-    [K in keyof TOOLS & string]?: ApprovalEntry<TOOLS[K], MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>;
+    [K in keyof TOOLS & string]?: ApprovalEntry<TOOLS[K], TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>;
   }): this;
   approval(nameOrEntries: string | Partial<Record<string, AnyApprovalEntry>>, entry?: AnyApprovalEntry): this {
     this.#state = this.#state.approval(nameOrEntries, entry);
@@ -541,7 +583,9 @@ class MutableToolSet<
   }
 
   /** Evaluate all predicates and resolvers. Returns resolved `{ tools, activeTools, toolApproval }`. */
-  inferTools(input?: InferToolsInput<MESSAGE, TOOLSET_CONTEXT>): ResolvedToolSet<TOOLS, RUNTIME_CONTEXT> {
+  inferTools(
+    input?: InferToolsInput<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
+  ): ResolvedToolSet<TOOLS, RUNTIME_CONTEXT> {
     return this.#state.inferTools(input);
   }
 
@@ -576,7 +620,7 @@ export function createToolSet<
   const TOOLS extends ToolRecord,
   MESSAGE extends MessageType = InferUIMessage<TOOLS>,
   TOOLSET_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
-  RUNTIME_CONTEXT = unknown,
+  RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
 >(
   options: CreateToolSetOptions<TOOLS> & { mutable: true },
 ): MutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>;
@@ -584,7 +628,7 @@ export function createToolSet<
   const TOOLS extends ToolRecord,
   MESSAGE extends MessageType = InferUIMessage<TOOLS>,
   TOOLSET_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
-  RUNTIME_CONTEXT = unknown,
+  RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
 >(
   options: CreateToolSetOptions<TOOLS> & { mutable?: false },
 ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, keyof TOOLS & string>;

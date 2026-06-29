@@ -1,4 +1,4 @@
-import { generateText, type UIMessage } from 'ai';
+import { generateText, type StepResult, stepCountIs, type UIMessage } from 'ai';
 import { Language, MockLanguageModel } from 'ai-test-kit/language';
 import { describe, expect, test } from 'vitest';
 import { createToolSet } from '../tool-set.js';
@@ -6,6 +6,16 @@ import { TOOLS, UIMessages } from './fixtures.js';
 
 const getToolNames = (model: MockLanguageModel, callIndex = 0) =>
   model.doGenerate.mock.calls[callIndex]?.[0]?.tools?.map((t) => t.name) ?? [];
+
+/** Build a minimal step whose tool calls reference the given tool names. */
+const stepWith = (...toolNames: Array<keyof typeof TOOLS & string>): StepResult<typeof TOOLS> => {
+  const calls = toolNames.map((toolName) => ({ toolName }));
+  return { toolCalls: calls, staticToolCalls: calls } as unknown as StepResult<typeof TOOLS>;
+};
+
+/** Count how often a tool was called across steps, reading `staticToolCalls`. */
+const countCalls = (steps: Array<StepResult<typeof TOOLS>>, toolName: string) =>
+  steps.reduce((sum, step) => sum + step.staticToolCalls.filter((c) => c.toolName === toolName).length, 0);
 
 describe('createToolSet', () => {
   test('should return immutable toolset by default', () => {
@@ -400,6 +410,86 @@ describe('immutable toolset', () => {
     });
   });
 
+  describe('steps', () => {
+    test('should pass steps to predicates', () => {
+      // Arrange
+      let received: Array<StepResult<typeof TOOLS>> | undefined;
+      const toolSet = createToolSet({ tools: TOOLS }).deactivateWhen('cancel', ({ steps }) => {
+        received = steps;
+        return false;
+      });
+
+      // Act
+      const steps = [stepWith('cancel')];
+      toolSet.inferTools({ steps });
+
+      // Assert
+      expect(received).toBe(steps);
+    });
+
+    test('should deactivate a tool once it reaches its call limit', () => {
+      // Arrange
+      const MAX_CALLS = 2;
+      const toolSet = createToolSet({ tools: TOOLS }).deactivateWhen(
+        'cancel',
+        ({ steps }) => countCalls(steps ?? [], 'cancel') >= MAX_CALLS,
+      );
+
+      // Act
+      const { activeTools } = toolSet.inferTools({ steps: [stepWith('cancel'), stepWith('cancel')] });
+
+      // Assert
+      expect(activeTools).not.toContain('cancel');
+    });
+
+    test('should keep a tool active below its call limit', () => {
+      // Arrange
+      const MAX_CALLS = 2;
+      const toolSet = createToolSet({ tools: TOOLS }).deactivateWhen(
+        'cancel',
+        ({ steps }) => countCalls(steps ?? [], 'cancel') >= MAX_CALLS,
+      );
+
+      // Act
+      const { activeTools } = toolSet.inferTools({ steps: [stepWith('cancel')] });
+
+      // Assert
+      expect(activeTools).toContain('cancel');
+    });
+
+    test('should only deactivate the limited tool, leaving others active', () => {
+      // Arrange
+      const MAX_CALLS = 1;
+      const toolSet = createToolSet({ tools: TOOLS }).deactivateWhen(
+        'cancel',
+        ({ steps }) => countCalls(steps ?? [], 'cancel') >= MAX_CALLS,
+      );
+
+      // Act
+      const { activeTools } = toolSet.inferTools({ steps: [stepWith('cancel'), stepWith('edit')] });
+
+      // Assert
+      expect(activeTools).not.toContain('cancel');
+      expect(activeTools).toContain('edit');
+      expect(activeTools).toContain('plain');
+    });
+
+    test('should treat missing steps as no calls', () => {
+      // Arrange
+      const MAX_CALLS = 2;
+      const toolSet = createToolSet({ tools: TOOLS }).deactivateWhen(
+        'cancel',
+        ({ steps }) => countCalls(steps ?? [], 'cancel') >= MAX_CALLS,
+      );
+
+      // Act
+      const { activeTools } = toolSet.inferTools();
+
+      // Assert
+      expect(activeTools).toContain('cancel');
+    });
+  });
+
   describe('approval', () => {
     test('should omit tools without an approval entry', () => {
       // Arrange
@@ -700,6 +790,40 @@ describe('immutable toolset', () => {
       expect(result.toolResults.length).toBe(1);
       expect(result.toolResults[0]!.output).toEqual({ success: true });
     });
+
+    test('should stop offering a tool to the model after its call limit via prepareStep', async () => {
+      // Arrange — the model calls `cancel` twice, then finishes with text
+      const model = MockLanguageModel.from([
+        { content: [Language.toolCall({ toolCallId: 'c-0', toolName: 'cancel', input: { orderId: 'o-1' } })] },
+        { content: [Language.toolCall({ toolCallId: 'c-1', toolName: 'cancel', input: { orderId: 'o-2' } })] },
+        { content: [Language.text('done')] },
+      ]);
+      const MAX_CALLS = 2;
+      const toolSet = createToolSet({ tools: TOOLS }).deactivateWhen(
+        'cancel',
+        ({ steps }) => countCalls(steps ?? [], 'cancel') >= MAX_CALLS,
+      );
+
+      // Act — pass the freshly inferred activeTools before each step
+      const result = await generateText({
+        model,
+        tools: toolSet.tools,
+        stopWhen: stepCountIs(10),
+        prompt: 'cancel everything',
+        prepareStep: ({ steps }) => {
+          const { activeTools } = toolSet.inferTools({ steps });
+          return { activeTools };
+        },
+      });
+
+      // Assert — `cancel` is offered on the first two steps, then withdrawn on the third
+      expect(getToolNames(model, 0)).toContain('cancel');
+      expect(getToolNames(model, 1)).toContain('cancel');
+      expect(getToolNames(model, 2)).not.toContain('cancel');
+      // Assert — `cancel` executed exactly MAX_CALLS times
+      const cancelCalls = result.steps.flatMap((s) => s.staticToolCalls).filter((c) => c.toolName === 'cancel').length;
+      expect(cancelCalls).toBe(MAX_CALLS);
+    });
   });
 });
 
@@ -950,6 +1074,34 @@ describe('mutable toolset', () => {
 
       // Act
       const { activeTools } = toolSet.inferTools({ toolSetContext: { isAdmin: true } });
+
+      // Assert
+      expect(activeTools).toContain('cancel');
+    });
+  });
+
+  describe('steps', () => {
+    test('should deactivate a tool once it reaches its call limit', () => {
+      // Arrange
+      const MAX_CALLS = 2;
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true });
+      toolSet.deactivateWhen('cancel', ({ steps }) => countCalls(steps ?? [], 'cancel') >= MAX_CALLS);
+
+      // Act
+      const { activeTools } = toolSet.inferTools({ steps: [stepWith('cancel'), stepWith('cancel')] });
+
+      // Assert
+      expect(activeTools).not.toContain('cancel');
+    });
+
+    test('should keep a tool active below its call limit', () => {
+      // Arrange
+      const MAX_CALLS = 2;
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true });
+      toolSet.deactivateWhen('cancel', ({ steps }) => countCalls(steps ?? [], 'cancel') >= MAX_CALLS);
+
+      // Act
+      const { activeTools } = toolSet.inferTools({ steps: [stepWith('cancel')] });
 
       // Assert
       expect(activeTools).toContain('cancel');
