@@ -31,9 +31,10 @@ jobs:
       - run: pnpm install
       - run: pnpm build
       # This is the v1 maintenance line (AI SDK v6). It always publishes under
-      # the `v1` dist-tag so it never moves `latest` off the current major.
-      - name: Publish to npm (v1)
-        run: pnpm publish --provenance --no-git-checks --tag v1
+      # the `legacy` dist-tag so it never moves `latest` off the current major.
+      # (npm rejects `v1` as a dist-tag since it parses as a SemVer range.)
+      - name: Publish to npm (legacy)
+        run: pnpm publish --provenance --no-git-checks --tag legacy
       # Move the floating v1.x tag onto this release commit so version-pinned
       # links like /tree/v1.x always resolve to the newest v1 release. Pushed
       # with the default GITHUB_TOKEN, whose pushes do not re-trigger workflows.
