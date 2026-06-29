@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.1.0](https://github.com/zirkelc/ai-tool-set/compare/v2.0.0...v2.1.0) (2026-06-29)
+
+
+### Features
+
+* add steps to predicate and approval input ([cb43bd7](https://github.com/zirkelc/ai-tool-set/commit/cb43bd7e7e5c25ab2a6e07eb7747979690283dea))
+
+
+### Documentation
+
+* clarify AI SDK v7 requirement for tool approval ([64648c7](https://github.com/zirkelc/ai-tool-set/commit/64648c75afa898b5549c9559eeb3b0d7e2148da7))
+* **examples:** rewrite examples on ai-test-kit ([faa8330](https://github.com/zirkelc/ai-tool-set/commit/faa83300fa6d3be34ed6dc8c9d74b6d8fd487654))
+
+
+### Continuous Integration
+
+* revert v1 dist-tag routing on main ([0f74379](https://github.com/zirkelc/ai-tool-set/commit/0f7437928be8d2aa140c632ff2238dda16d29259))
+* route v1 releases to the v1 npm dist-tag ([756a6e2](https://github.com/zirkelc/ai-tool-set/commit/756a6e2ff69a67a80eef9c81797cdd3ba63402f8))
+
 ## [2.0.0](https://github.com/zirkelc/ai-tool-set/compare/v1.2.3...v2.0.0) (2026-06-26)
 
 
