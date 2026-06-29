@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.0](https://github.com/zirkelc/ai-tool-set/compare/v1.2.4...v1.3.0) (2026-06-29)
+
+
+### Features
+
+* add steps to the activation predicate input ([90a8887](https://github.com/zirkelc/ai-tool-set/commit/90a8887603a14a42c7c77459854b8210ae0b202e))
+
+
+### Documentation
+
+* align README conditional-activation wording with v2 ([5e87d4a](https://github.com/zirkelc/ai-tool-set/commit/5e87d4afcb002269282966bd05d25ee7c96d6338))
+
 ## [1.2.4](https://github.com/zirkelc/ai-tool-set/compare/v1.2.3...v1.2.4) (2026-06-29)
 
 
