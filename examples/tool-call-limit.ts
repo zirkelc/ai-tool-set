@@ -1,26 +1,18 @@
 /**
- * Experiment — limit how often a SPECIFIC tool may be called, using the
- * library's `deactivateWhen` condition with first-class typed `steps`.
+ * Per-tool call limit — cap how often a single tool may be called.
  *
- * The AI SDK has NO built-in per-tool call limit. `stopWhen`/`stepCountIs`
- * only cap the TOTAL number of steps, not how often one named tool runs.
- * The building block is `prepareStep` + `activeTools`: before every step we
- * inspect history and narrow the active tool set. This library expresses that
- * as a chainable `deactivateWhen(name, predicate)` — the tool is active by
- * default and goes inactive once the predicate returns true.
+ * The AI SDK has no built-in per-tool limit (`stopWhen`/`stepCountIs` only cap
+ * the total number of steps). `deactivateWhen` plus `prepareStep` gives you one:
+ * before each step, count `search` calls in the run history and deactivate it
+ * once it reaches the budget. The predicate reads `steps`, inferred from the
+ * tool set so the step's tool calls are typed.
  *
- * The predicate input now exposes `steps` alongside `messages`, inferred
- * straight from the tool set as `Array<StepResult<typeof tools>>`. Counting
- * prior calls of a tool is a one-line reduce — no `toolSetContext` plumbing and
- * no message content-part narrowing.
- *
- * Note: read `step.staticToolCalls`, not `step.toolCalls`. `toolCalls` unions in
- * a dynamic-tool branch whose `toolName` is `string`, which widens the type;
+ * Note: count from `step.staticToolCalls`, not `step.toolCalls`. `toolCalls`
+ * includes a dynamic-tool branch whose `toolName` widens to `string`;
  * `staticToolCalls` keeps `toolName` narrowed to the declared tool names.
  *
- * Uses ai-test-kit's MockLanguageModel so it runs without any API keys. The mock
- * keeps calling `search` while it is offered, then emits final text once it has
- * been deactivated.
+ * Uses ai-test-kit's MockLanguageModel so it runs without any API keys: the mock
+ * keeps calling `search` while it is offered, then emits text once it is gone.
  *
  * Run: pnpm tsx examples/tool-call-limit.ts
  */
@@ -62,7 +54,7 @@ const toolSet = createToolSet<typeof tools, ModelMessage>({ tools }).deactivateW
 /** Mock model (ai-test-kit): call `search` while it is offered, otherwise produce final text. */
 let searchCallId = 0;
 const model = MockLanguageModel.from({
-  doGenerate: ({ tools: availableTools }) => {
+  doGenerate: async ({ tools: availableTools }) => {
     const canSearch = availableTools?.some((t) => t.type === 'function' && t.name === 'search');
     if (canSearch) {
       return Language.result([
