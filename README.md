@@ -105,10 +105,25 @@ const toolSet = createToolSet({ tools })
     ),
   )
   // steps: deactivate search once it has been called in this run
-  .deactivateWhen('search', ({ steps }) => steps?.some((s) => s.staticToolCalls.some((c) => c.toolName === 'search')));
+  .deactivateWhen('search', ({ steps }) =>
+    steps?.some((s) => s.staticToolCalls.some((c) => c.toolName === 'search')),
+  );
 ```
 
-Call `.inferTools()` with messages and/or context to evaluate activation predicates and resolve `activeTools`:
+You can also activate or deactivate multiple tools at once using the object form:
+
+```typescript
+const toolSet = createToolSet({ tools })
+  .activateWhen({
+    list_orders: ({ context }) => { /* ... */ },
+    cancel_order: ({ messages }) => { /* ... */ },
+  })
+  .deactivateWhen({
+    search: ({ steps }) => { /* ... */ },
+  });
+```
+
+Call `.inferTools()` with `messages` and/or `context` to evaluate activation predicates and resolve `activeTools`:
 
 ```typescript
 const messages = [
@@ -143,35 +158,23 @@ const { tools, activeTools } = toolSet.inferTools({ messages, context });
 const result = await generateText({ model, tools, activeTools, messages });
 ```
 
-`messages` and `context` are values you pass to `inferTools()`. `steps` instead come from the run — the [`StepResult`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text#steps) array the AI SDK hands to [`prepareStep`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text#prepare-step), inferred from the tool set so each step's tool calls are typed. Re-evaluate active tools before each step:
+In a multi-step run, you can call `.inferTools()` inside `prepareStep()` to re-evaluate active tools after each step. Here you also have access to the `steps` array, which contains the completed steps of the current run:
 
 ```typescript
 import { generateText, stepCountIs } from 'ai';
 
+const { tools } = toolSet;
+
 const result = await generateText({
   model,
-  tools: toolSet.tools,
+  tools,
   stopWhen: stepCountIs(10),
-  prompt: 'Research my orders and cancel the unfulfilled one',
-  // Resolve activeTools from the steps completed so far
+  prompt: 'Find my orders and cancel the unfulfilled one',
   prepareStep: ({ steps }) => {
+    // Resolve activeTools from the steps completed so far
     const { activeTools } = toolSet.inferTools({ steps });
     return { activeTools };
   },
-});
-```
-
-> [!NOTE]
-> Read `step.staticToolCalls` for typed tool names. `step.toolCalls` also includes dynamic (runtime-named) calls, so its `toolName` widens to `string`; `staticToolCalls` keeps `toolName` narrowed to your declared tool names.
-
-See [`examples/tool-call-limit.ts`](examples/tool-call-limit.ts) for a runnable example.
-
-You can also activate multiple tools at once:
-
-```typescript
-const toolSet = createToolSet({ tools }).activateWhen({
-  list_orders: ({ context }) => context?.isAuthenticated,
-  cancel_order: ({ messages }) => hasUnfulfilledOrders(messages),
 });
 ```
 
