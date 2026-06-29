@@ -1,6 +1,6 @@
 {
   "name": "ai-tool-set",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Conditional tool activation for the AI SDK, fully type-safe",
   "keywords": [
     "ai",
