@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.4](https://github.com/zirkelc/ai-tool-set/compare/v1.2.3...v1.2.4) (2026-06-29)
+
+
+### Continuous Integration
+
+* add release-please job for the v1 maintenance line ([c43e7e3](https://github.com/zirkelc/ai-tool-set/commit/c43e7e3ea36fc445eea2c32fdce2b27edc582477))
+
 ## [1.2.3](https://github.com/zirkelc/ai-tool-set/compare/v1.2.2...v1.2.3) (2026-06-26)
 
 
