@@ -30,14 +30,19 @@ jobs:
           cache: 'pnpm'
       - run: pnpm install
       - run: pnpm build
-      # A prerelease release (cut from the `next` branch) is flagged
-      # `prerelease: true` by release-please, so publish it under the `next`
-      # dist-tag to keep `latest` pointing at the stable line. A normal release
-      # publishes to `latest`. workflow_dispatch has no release payload, so the
-      # prerelease flag is falsy and it publishes to `latest`.
+      # Pick the npm dist-tag from the release:
+      # - `next`: prereleases (cut from the `next` branch, flagged prerelease by
+      #   release-please).
+      # - `v1`: the v1 maintenance line (older major), kept off `latest` so bare
+      #   installs stay on the current major. Detected by the `v1.` tag prefix.
+      # - `latest`: normal releases on the current major. workflow_dispatch has no
+      #   release payload, so the flags are falsy and it falls through to `latest`.
       - name: Publish to npm (latest)
-        if: ${{ !github.event.release.prerelease }}
+        if: ${{ !github.event.release.prerelease && !startsWith(github.event.release.tag_name, 'v1.') }}
         run: pnpm publish --provenance --no-git-checks
+      - name: Publish to npm (v1 maintenance)
+        if: ${{ !github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v1.') }}
+        run: pnpm publish --provenance --no-git-checks --tag v1
       - name: Publish to npm (next)
         if: ${{ github.event.release.prerelease }}
         run: pnpm publish --provenance --no-git-checks --tag next
