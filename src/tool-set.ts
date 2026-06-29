@@ -1,4 +1,4 @@
-import type { InferUITool, ModelMessage, Tool, UIMessage } from 'ai';
+import type { InferUITool, ModelMessage, StepResult, Tool, UIMessage } from 'ai';
 
 /** A plain record of tools. */
 type ToolRecord = Record<string, Tool>;
@@ -47,22 +47,25 @@ export type InferAllTools<TOOLSET extends AnyToolSet> = keyof InferToolSet<TOOLS
  * Use `ActivationInput<MyMsg>` to get per-tool narrowing in callbacks.
  */
 export type ActivationInput<
+  TOOLS extends ToolRecord = ToolRecord,
   MESSAGE extends MessageType = UIMessage,
   CONTEXT extends Record<string, unknown> = Record<string, unknown>,
 > = {
   messages?: Array<MESSAGE>;
+  steps?: Array<StepResult<TOOLS>>;
   context?: CONTEXT;
 };
 
 /** Activation predicate — returns true if tool should be active. Undefined is treated as false. */
 type ActivationPredicate<
+  TOOLS extends ToolRecord = ToolRecord,
   MESSAGE extends MessageType = UIMessage,
   CONTEXT extends Record<string, unknown> = Record<string, unknown>,
-> = (input: ActivationInput<MESSAGE, CONTEXT>) => boolean | undefined;
+> = (input: ActivationInput<TOOLS, MESSAGE, CONTEXT>) => boolean | undefined;
 
 type ActivationEntry = {
   toolName: string;
-  resolve: (input: ActivationInput<any, any>) => boolean | undefined;
+  resolve: (input: ActivationInput<any, any, any>) => boolean | undefined;
 };
 
 /** Resolved tools and active tool names returned by `inferTools()`. */
@@ -105,8 +108,8 @@ export type ToolSet<TOOLSET extends AnyToolSet> =
       : never;
 
 const toEntries = (
-  nameOrPredicates: string | Partial<Record<string, ActivationPredicate<any, any>>>,
-  predicate?: ActivationPredicate<any, any>,
+  nameOrPredicates: string | Partial<Record<string, ActivationPredicate<any, any, any>>>,
+  predicate?: ActivationPredicate<any, any, any>,
 ): Array<ActivationEntry> => {
   if (typeof nameOrPredicates === 'string') {
     return [{ toolName: nameOrPredicates, resolve: predicate! }];
@@ -152,25 +155,25 @@ class ToolSetState<
   }
 
   activateWhen(
-    nameOrPredicates: string | Partial<Record<string, ActivationPredicate<MESSAGE, CONTEXT>>>,
-    predicate?: ActivationPredicate<MESSAGE, CONTEXT>,
+    nameOrPredicates: string | Partial<Record<string, ActivationPredicate<TOOLS, MESSAGE, CONTEXT>>>,
+    predicate?: ActivationPredicate<TOOLS, MESSAGE, CONTEXT>,
   ): ToolSetState<TOOLS, MESSAGE, CONTEXT> {
     return new ToolSetState(this.#tools, [...this.#entries, ...toEntries(nameOrPredicates, predicate)]);
   }
 
   deactivateWhen(
-    nameOrPredicates: string | Partial<Record<string, ActivationPredicate<MESSAGE, CONTEXT>>>,
-    predicate?: ActivationPredicate<MESSAGE, CONTEXT>,
+    nameOrPredicates: string | Partial<Record<string, ActivationPredicate<TOOLS, MESSAGE, CONTEXT>>>,
+    predicate?: ActivationPredicate<TOOLS, MESSAGE, CONTEXT>,
   ): ToolSetState<TOOLS, MESSAGE, CONTEXT> {
     const newEntries = toEntries(nameOrPredicates, predicate).map((e) => ({
       ...e,
-      resolve: (input: ActivationInput<any, any>) => !e.resolve(input),
+      resolve: (input: ActivationInput<any, any, any>) => !e.resolve(input),
     }));
     return new ToolSetState(this.#tools, [...this.#entries, ...newEntries]);
   }
 
   /** Evaluate all predicates with the provided input and return resolved tools + activeTools. */
-  inferTools(input?: ActivationInput<MESSAGE, CONTEXT>): ResolvedToolSet<TOOLS> {
+  inferTools(input?: ActivationInput<TOOLS, MESSAGE, CONTEXT>): ResolvedToolSet<TOOLS> {
     const allNames = Object.keys(this.#tools) as Array<keyof TOOLS & string>;
     const activeTools = allNames.filter((name) => {
       const lastEntry = this.#entries.findLast((e) => e.toolName === name);
@@ -225,14 +228,14 @@ class ImmutableToolSet<
    */
   activateWhen<NAME extends keyof TOOLS & string>(
     name: NAME,
-    predicate: ActivationPredicate<MESSAGE, CONTEXT>,
+    predicate: ActivationPredicate<TOOLS, MESSAGE, CONTEXT>,
   ): ImmutableToolSet<TOOLS, MESSAGE, CONTEXT, Exclude<ACTIVATED, NAME>, DEACTIVATED | NAME>;
   activateWhen<NAMES extends keyof TOOLS & string>(
-    predicates: Partial<Record<NAMES, ActivationPredicate<MESSAGE, CONTEXT>>>,
+    predicates: Partial<Record<NAMES, ActivationPredicate<TOOLS, MESSAGE, CONTEXT>>>,
   ): ImmutableToolSet<TOOLS, MESSAGE, CONTEXT, Exclude<ACTIVATED, NAMES>, DEACTIVATED | NAMES>;
   activateWhen(
-    nameOrPredicates: string | Partial<Record<string, ActivationPredicate<MESSAGE, CONTEXT>>>,
-    predicate?: ActivationPredicate<MESSAGE, CONTEXT>,
+    nameOrPredicates: string | Partial<Record<string, ActivationPredicate<TOOLS, MESSAGE, CONTEXT>>>,
+    predicate?: ActivationPredicate<TOOLS, MESSAGE, CONTEXT>,
   ): ImmutableToolSet<TOOLS, MESSAGE, CONTEXT, ACTIVATED, DEACTIVATED> {
     return new ImmutableToolSet(this.#state.activateWhen(nameOrPredicates, predicate));
   }
@@ -243,20 +246,20 @@ class ImmutableToolSet<
    */
   deactivateWhen<NAME extends keyof TOOLS & string>(
     name: NAME,
-    predicate: ActivationPredicate<MESSAGE, CONTEXT>,
+    predicate: ActivationPredicate<TOOLS, MESSAGE, CONTEXT>,
   ): ImmutableToolSet<TOOLS, MESSAGE, CONTEXT, ACTIVATED | NAME, Exclude<DEACTIVATED, NAME>>;
   deactivateWhen<NAMES extends keyof TOOLS & string>(
-    predicates: Partial<Record<NAMES, ActivationPredicate<MESSAGE, CONTEXT>>>,
+    predicates: Partial<Record<NAMES, ActivationPredicate<TOOLS, MESSAGE, CONTEXT>>>,
   ): ImmutableToolSet<TOOLS, MESSAGE, CONTEXT, ACTIVATED | NAMES, Exclude<DEACTIVATED, NAMES>>;
   deactivateWhen(
-    nameOrPredicates: string | Partial<Record<string, ActivationPredicate<MESSAGE, CONTEXT>>>,
-    predicate?: ActivationPredicate<MESSAGE, CONTEXT>,
+    nameOrPredicates: string | Partial<Record<string, ActivationPredicate<TOOLS, MESSAGE, CONTEXT>>>,
+    predicate?: ActivationPredicate<TOOLS, MESSAGE, CONTEXT>,
   ): ImmutableToolSet<TOOLS, MESSAGE, CONTEXT, ACTIVATED, DEACTIVATED> {
     return new ImmutableToolSet(this.#state.deactivateWhen(nameOrPredicates, predicate));
   }
 
   /** Evaluate all predicates with the provided input. Returns resolved `{ tools, activeTools }`. */
-  inferTools(input?: ActivationInput<MESSAGE, CONTEXT>): ResolvedToolSet<TOOLS> {
+  inferTools(input?: ActivationInput<TOOLS, MESSAGE, CONTEXT>): ResolvedToolSet<TOOLS> {
     return this.#state.inferTools(input);
   }
 
@@ -306,11 +309,11 @@ class MutableToolSet<
   /**
    * Conditionally activate a tool — inactive by default, becomes active when predicate returns true.
    */
-  activateWhen(name: keyof TOOLS & string, predicate: ActivationPredicate<MESSAGE, CONTEXT>): this;
-  activateWhen(predicates: Partial<Record<keyof TOOLS & string, ActivationPredicate<MESSAGE, CONTEXT>>>): this;
+  activateWhen(name: keyof TOOLS & string, predicate: ActivationPredicate<TOOLS, MESSAGE, CONTEXT>): this;
+  activateWhen(predicates: Partial<Record<keyof TOOLS & string, ActivationPredicate<TOOLS, MESSAGE, CONTEXT>>>): this;
   activateWhen(
-    nameOrPredicates: string | Partial<Record<string, ActivationPredicate<MESSAGE, CONTEXT>>>,
-    predicate?: ActivationPredicate<MESSAGE, CONTEXT>,
+    nameOrPredicates: string | Partial<Record<string, ActivationPredicate<TOOLS, MESSAGE, CONTEXT>>>,
+    predicate?: ActivationPredicate<TOOLS, MESSAGE, CONTEXT>,
   ): this {
     this.#state = this.#state.activateWhen(nameOrPredicates, predicate);
     return this;
@@ -319,18 +322,18 @@ class MutableToolSet<
   /**
    * Conditionally deactivate a tool — active by default, becomes inactive when predicate returns true.
    */
-  deactivateWhen(name: keyof TOOLS & string, predicate: ActivationPredicate<MESSAGE, CONTEXT>): this;
-  deactivateWhen(predicates: Partial<Record<keyof TOOLS & string, ActivationPredicate<MESSAGE, CONTEXT>>>): this;
+  deactivateWhen(name: keyof TOOLS & string, predicate: ActivationPredicate<TOOLS, MESSAGE, CONTEXT>): this;
+  deactivateWhen(predicates: Partial<Record<keyof TOOLS & string, ActivationPredicate<TOOLS, MESSAGE, CONTEXT>>>): this;
   deactivateWhen(
-    nameOrPredicates: string | Partial<Record<string, ActivationPredicate<MESSAGE, CONTEXT>>>,
-    predicate?: ActivationPredicate<MESSAGE, CONTEXT>,
+    nameOrPredicates: string | Partial<Record<string, ActivationPredicate<TOOLS, MESSAGE, CONTEXT>>>,
+    predicate?: ActivationPredicate<TOOLS, MESSAGE, CONTEXT>,
   ): this {
     this.#state = this.#state.deactivateWhen(nameOrPredicates, predicate);
     return this;
   }
 
   /** Evaluate all predicates with the provided input. Returns resolved `{ tools, activeTools }`. */
-  inferTools(input?: ActivationInput<MESSAGE, CONTEXT>): ResolvedToolSet<TOOLS> {
+  inferTools(input?: ActivationInput<TOOLS, MESSAGE, CONTEXT>): ResolvedToolSet<TOOLS> {
     return this.#state.inferTools(input);
   }
 

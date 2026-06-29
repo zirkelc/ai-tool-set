@@ -87,12 +87,13 @@ const result = await generateText({
 
 ### Conditional Activation
 
-Use `.activateWhen()` and `.deactivateWhen()` to conditionally control tools based on messages and context. The predicate receives an input with `messages` and `context` (both can be `undefined` if not provided to `inferTools`) and should return a boolean (or undefined) to determine whether the tool should be activated/deactivated.
+Use `.activateWhen()` and `.deactivateWhen()` to conditionally control tools based on messages, step history, and context. The predicate receives an input with `messages`, `steps`, and `context` (all can be `undefined` if not provided to `inferTools`) and should return a boolean (or undefined) to determine whether the tool should be activated/deactivated.
 
 ```typescript
-// Conditional activation with a predicate that checks for unfulfilled orders in the messages
 const toolSet = createToolSet({ tools })
+  // context: activate list_orders for authenticated users
   .activateWhen('list_orders', ({ context }) => context?.isAuthenticated)
+  // messages: activate cancel_order when the conversation has unfulfilled orders
   .activateWhen('cancel_order', ({ messages }) =>
     messages?.some((m) =>
       m.parts.some(
@@ -102,7 +103,9 @@ const toolSet = createToolSet({ tools })
           p.output.orders?.some((order) => order.status !== 'fulfilled'),
       ),
     ),
-  );
+  )
+  // steps: deactivate search once it has been called in this run
+  .deactivateWhen('search', ({ steps }) => steps?.some((s) => s.staticToolCalls.some((c) => c.toolName === 'search')));
 ```
 
 Call `.inferTools()` with messages and/or context to evaluate activation predicates and resolve `activeTools`:
@@ -139,6 +142,29 @@ const { tools, activeTools } = toolSet.inferTools({ messages, context });
 
 const result = await generateText({ model, tools, activeTools, messages });
 ```
+
+`messages` and `context` are values you pass to `inferTools()`. `steps` instead come from the run — the [`StepResult`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text#steps) array the AI SDK hands to [`prepareStep`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text#prepare-step), inferred from the tool set so each step's tool calls are typed. Re-evaluate active tools before each step:
+
+```typescript
+import { generateText, stepCountIs } from 'ai';
+
+const result = await generateText({
+  model,
+  tools: toolSet.tools,
+  stopWhen: stepCountIs(10),
+  prompt: 'Research my orders and cancel the unfulfilled one',
+  // Resolve activeTools from the steps completed so far
+  prepareStep: ({ steps }) => {
+    const { activeTools } = toolSet.inferTools({ steps });
+    return { activeTools };
+  },
+});
+```
+
+> [!NOTE]
+> Read `step.staticToolCalls` for typed tool names. `step.toolCalls` also includes dynamic (runtime-named) calls, so its `toolName` widens to `string`; `staticToolCalls` keeps `toolName` narrowed to your declared tool names.
+
+See [`examples/tool-call-limit.ts`](examples/tool-call-limit.ts) for a runnable example.
 
 You can also activate multiple tools at once:
 
@@ -372,7 +398,7 @@ toolSet.deactivate(['search']);
 
 #### `.activateWhen(name, predicate)` / `.activateWhen(predicates)`
 
-Conditionally activate tools. The predicate receives `{ messages, context }` and returns `true` to activate. Both `messages` and `context` can be `undefined` if not provided to `inferTools`. Returning `undefined` is treated as `false`.
+Conditionally activate tools. The predicate receives `{ messages, steps, context }` and returns `true` to activate. All fields can be `undefined` if not provided to `inferTools`. Returning `undefined` is treated as `false`.
 
 ```ts
 toolSet.activateWhen('cancel_order', ({ messages }) => messages?.some((m) => hasOrders(m)));
@@ -385,7 +411,7 @@ toolSet.activateWhen({
 
 #### `.deactivateWhen(name, predicate)` / `.deactivateWhen(predicates)`
 
-Conditionally deactivate tools. The predicate receives `{ messages, context }` and returns `true` to deactivate. Both `messages` and `context` can be `undefined` if not provided to `inferTools`. Returning `undefined` is treated as `false` (tool stays active).
+Conditionally deactivate tools. The predicate receives `{ messages, steps, context }` and returns `true` to deactivate. All fields can be `undefined` if not provided to `inferTools`. Returning `undefined` is treated as `false` (tool stays active).
 
 ```ts
 toolSet.deactivateWhen('search', ({ messages }) => messages && messages.length > 10);
@@ -397,6 +423,7 @@ Evaluate all predicates and return `{ tools, activeTools }`, directly spreadable
 
 - `input` (optional):
   - `messages` (optional), the current conversation messages
+  - `steps` (optional), the completed steps of the current run (the `StepResult` array from `prepareStep`)
   - `context` (optional), arbitrary values passed to predicates
 
 ```ts
@@ -408,6 +435,9 @@ const { tools, activeTools } = toolSet.inferTools({ messages });
 
 // With context
 const { tools, activeTools } = toolSet.inferTools({ context: { isAdmin: true } });
+
+// With steps (e.g. inside prepareStep)
+const { tools, activeTools } = toolSet.inferTools({ steps });
 
 // With both
 const { tools, activeTools } = toolSet.inferTools({ messages, context });
@@ -428,13 +458,13 @@ const immutableClone = toolSet.clone();
 
 ### `ActivationInput`
 
-Input passed to activation predicates. Generic over `MESSAGE` and `CONTEXT`. Both `messages` and `context` are optional since they may not be provided to `inferTools`:
+Input passed to activation predicates. Generic over `TOOLS`, `MESSAGE`, and `CONTEXT`. All fields are optional since they may not be provided to `inferTools`. `steps` is inferred from `TOOLS`:
 
 ```ts
 import type { ActivationInput } from 'ai-tool-set';
 
-type MyInput = ActivationInput<MyUIMessage, { isAdmin: boolean }>;
-// { messages?: Array<MyUIMessage>; context?: { isAdmin: boolean } }
+type MyInput = ActivationInput<typeof tools, MyUIMessage, { isAdmin: boolean }>;
+// { messages?: Array<MyUIMessage>; steps?: Array<StepResult<typeof tools>>; context?: { isAdmin: boolean } }
 ```
 
 ### `ToolSet`
