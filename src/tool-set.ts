@@ -1,4 +1,4 @@
-import type { InferUITool, ModelMessage, StepResult, Tool, UIMessage } from 'ai';
+import type { InferUITool, ModelMessage, StepResult, Tool, ToolChoice, UIMessage } from 'ai';
 
 /** A plain record of tools. */
 type ToolRecord = Record<string, Tool>;
@@ -68,10 +68,32 @@ type ActivationEntry = {
   resolve: (input: ActivationInput<any, any, any>) => boolean | undefined;
 };
 
+/**
+ * Resolves the toolset's `toolChoice` at `inferTools()` time from the toolset's own values
+ * (`context`, your `messages`, `steps`). Returns a {@link ToolChoice} to force, or `undefined`
+ * to leave the choice unconstrained (omitted, so the AI SDK defaults to `'auto'`).
+ */
+type ToolChoiceResolver<
+  TOOLS extends ToolRecord = ToolRecord,
+  MESSAGE extends MessageType = UIMessage,
+  CONTEXT extends Record<string, unknown> = Record<string, unknown>,
+> = (input: ActivationInput<TOOLS, MESSAGE, CONTEXT>) => ToolChoice<TOOLS> | undefined;
+
+/** A tool-choice entry for the toolset — a constant {@link ToolChoice} or a resolver. */
+type ToolChoiceEntry<
+  TOOLS extends ToolRecord = ToolRecord,
+  MESSAGE extends MessageType = UIMessage,
+  CONTEXT extends Record<string, unknown> = Record<string, unknown>,
+> = ToolChoice<TOOLS> | ToolChoiceResolver<TOOLS, MESSAGE, CONTEXT>;
+
+/** Any tool-choice entry value, for internal storage. */
+type AnyToolChoiceEntry = ToolChoice<any> | ToolChoiceResolver<any, any, any>;
+
 /** Resolved tools and active tool names returned by `inferTools()`. */
 type ResolvedToolSet<TOOLS extends ToolRecord> = {
   tools: TOOLS;
   activeTools: Array<keyof TOOLS & string>;
+  toolChoice?: ToolChoice<TOOLS>;
 };
 
 /** Union of both toolset classes for type utility constraints. */
@@ -133,10 +155,12 @@ class ToolSetState<
 > {
   readonly #tools: TOOLS;
   readonly #entries: Array<ActivationEntry>;
+  readonly #toolChoiceEntries: Array<AnyToolChoiceEntry>;
 
-  constructor(tools: TOOLS, entries: Array<ActivationEntry>) {
+  constructor(tools: TOOLS, entries: Array<ActivationEntry>, toolChoiceEntries: Array<AnyToolChoiceEntry> = []) {
     this.#tools = tools;
     this.#entries = entries;
+    this.#toolChoiceEntries = toolChoiceEntries;
   }
 
   /** All tools as a standard AI SDK tool record. */
@@ -146,19 +170,23 @@ class ToolSetState<
 
   activate(names: Array<string>): ToolSetState<TOOLS, MESSAGE, CONTEXT> {
     const newEntries = names.map((name) => ({ toolName: name, resolve: () => true }));
-    return new ToolSetState(this.#tools, [...this.#entries, ...newEntries]);
+    return new ToolSetState(this.#tools, [...this.#entries, ...newEntries], this.#toolChoiceEntries);
   }
 
   deactivate(names: Array<string>): ToolSetState<TOOLS, MESSAGE, CONTEXT> {
     const newEntries = names.map((name) => ({ toolName: name, resolve: () => false }));
-    return new ToolSetState(this.#tools, [...this.#entries, ...newEntries]);
+    return new ToolSetState(this.#tools, [...this.#entries, ...newEntries], this.#toolChoiceEntries);
   }
 
   activateWhen(
     nameOrPredicates: string | Partial<Record<string, ActivationPredicate<TOOLS, MESSAGE, CONTEXT>>>,
     predicate?: ActivationPredicate<TOOLS, MESSAGE, CONTEXT>,
   ): ToolSetState<TOOLS, MESSAGE, CONTEXT> {
-    return new ToolSetState(this.#tools, [...this.#entries, ...toEntries(nameOrPredicates, predicate)]);
+    return new ToolSetState(
+      this.#tools,
+      [...this.#entries, ...toEntries(nameOrPredicates, predicate)],
+      this.#toolChoiceEntries,
+    );
   }
 
   deactivateWhen(
@@ -169,10 +197,15 @@ class ToolSetState<
       ...e,
       resolve: (input: ActivationInput<any, any, any>) => !e.resolve(input),
     }));
-    return new ToolSetState(this.#tools, [...this.#entries, ...newEntries]);
+    return new ToolSetState(this.#tools, [...this.#entries, ...newEntries], this.#toolChoiceEntries);
   }
 
-  /** Evaluate all predicates with the provided input and return resolved tools + activeTools. */
+  /** Set the toolset's `toolChoice` — a constant {@link ToolChoice} or a resolver. Last-call wins. */
+  choice(entry: AnyToolChoiceEntry): ToolSetState<TOOLS, MESSAGE, CONTEXT> {
+    return new ToolSetState(this.#tools, this.#entries, [...this.#toolChoiceEntries, entry]);
+  }
+
+  /** Evaluate all predicates with the provided input and return resolved tools, activeTools, and toolChoice. */
   inferTools(input?: ActivationInput<TOOLS, MESSAGE, CONTEXT>): ResolvedToolSet<TOOLS> {
     const allNames = Object.keys(this.#tools) as Array<keyof TOOLS & string>;
     const activeTools = allNames.filter((name) => {
@@ -180,7 +213,14 @@ class ToolSetState<
       if (!lastEntry) return true;
       return lastEntry.resolve(input ?? {});
     });
-    return { tools: this.#tools, activeTools };
+
+    /** The last `choice()` entry wins; a resolver runs now with the toolset values. */
+    const lastToolChoice = this.#toolChoiceEntries.at(-1);
+    const toolChoice = (typeof lastToolChoice === 'function' ? lastToolChoice(input ?? {}) : lastToolChoice) as
+      | ToolChoice<TOOLS>
+      | undefined;
+
+    return { tools: this.#tools, activeTools, toolChoice };
   }
 }
 
@@ -258,7 +298,18 @@ class ImmutableToolSet<
     return new ImmutableToolSet(this.#state.deactivateWhen(nameOrPredicates, predicate));
   }
 
-  /** Evaluate all predicates with the provided input. Returns resolved `{ tools, activeTools }`. */
+  /**
+   * Set the toolset's `toolChoice` — a constant `ToolChoice` (`'auto'`, `'none'`, `'required'`, or
+   * `{ type: 'tool', toolName }`) or a resolver that runs at `inferTools()` time with the toolset
+   * values and returns a `ToolChoice` (or `undefined` to leave it unconstrained). Last-call wins.
+   */
+  choice(
+    entry: ToolChoiceEntry<TOOLS, MESSAGE, CONTEXT>,
+  ): ImmutableToolSet<TOOLS, MESSAGE, CONTEXT, ACTIVATED, DEACTIVATED> {
+    return new ImmutableToolSet(this.#state.choice(entry));
+  }
+
+  /** Evaluate all predicates with the provided input. Returns resolved `{ tools, activeTools, toolChoice }`. */
   inferTools(input?: ActivationInput<TOOLS, MESSAGE, CONTEXT>): ResolvedToolSet<TOOLS> {
     return this.#state.inferTools(input);
   }
@@ -332,7 +383,17 @@ class MutableToolSet<
     return this;
   }
 
-  /** Evaluate all predicates with the provided input. Returns resolved `{ tools, activeTools }`. */
+  /**
+   * Set the toolset's `toolChoice` — a constant `ToolChoice` (`'auto'`, `'none'`, `'required'`, or
+   * `{ type: 'tool', toolName }`) or a resolver that runs at `inferTools()` time with the toolset
+   * values and returns a `ToolChoice` (or `undefined` to leave it unconstrained). Last-call wins.
+   */
+  choice(entry: ToolChoiceEntry<TOOLS, MESSAGE, CONTEXT>): this {
+    this.#state = this.#state.choice(entry);
+    return this;
+  }
+
+  /** Evaluate all predicates with the provided input. Returns resolved `{ tools, activeTools, toolChoice }`. */
   inferTools(input?: ActivationInput<TOOLS, MESSAGE, CONTEXT>): ResolvedToolSet<TOOLS> {
     return this.#state.inferTools(input);
   }

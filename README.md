@@ -12,16 +12,17 @@
 
 </div>
 
-This library provides a type-safe API to manage [`activeTools`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text#active-tools) for [`generateText()`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text) and [`streamText()`](https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text) in the AI SDK.
+This library provides a type-safe API to manage [`activeTools`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text#active-tools) and [`toolChoice`](https://ai-sdk.dev/docs/ai-sdk-core/tools-and-tool-calling#tool-choice) for [`generateText()`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text) and [`streamText()`](https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text) in the AI SDK.
 
 ### Why?
 
-The AI SDK provides an `activeTools` parameter to control which tools the model can use at any given time. However, managing tool activation becomes complex when you need to:
+The AI SDK provides an `activeTools` parameter to control which tools the model can use, and a `toolChoice` parameter to force which tool is called. However, managing this becomes complex when you need to:
 
 - **Statically activate/deactivate tools**: Some tools should be inactive by default and only available after being explicitly activated
 - **Dynamically infer tool activation**: Some tools should be activated based on runtime context like the conversation history
+- **Force tool choice**: Sometimes the model should be required to call a specific tool, or any tool, based on context
 
-This library wraps standard AI SDK `tool()` definitions with chainable activation methods and resolves `tools` and `activeTools` for any AI SDK function.
+This library wraps standard AI SDK `tool()` definitions with chainable activation and choice methods and resolves `tools`, `activeTools`, and `toolChoice` for any AI SDK function.
 
 ### Installation
 
@@ -218,6 +219,50 @@ const toolSet = createToolSet({ tools })
   .deactivate(['cancel_order'])
   // cancel_order: deactivated with conditional activation
   .activateWhen('cancel_order', ({ messages }) => hasUnfulfilledOrders(messages));
+```
+
+### Tool Choice
+
+The AI SDK can steer tool calls with [`toolChoice`](https://ai-sdk.dev/docs/ai-sdk-core/tools-and-tool-calling#tool-choice), which controls whether and which tool the model must call. `.inferTools()` resolves a `toolChoice` value alongside `tools` and `activeTools`, so a single tool set drives activation and choice together.
+
+Use `.choice()` with a constant for static choices or use a resolver to decide dynamically:
+
+```typescript
+const toolSet = createToolSet({ tools })
+  .deactivate(['cancel_order'])
+  // Force the model to call one of the active tools this turn
+  .choice('required')
+  // Or resolve dynamically, e.g. force unauthenticated users into search
+  .choice(({ context }) => (context?.isAuthenticated ? 'auto' : { type: 'tool', toolName: 'search' }));
+
+const { tools, activeTools, toolChoice } = toolSet.inferTools();
+
+const result = await generateText({ model, tools, activeTools, toolChoice, prompt: 'Show me my orders' });
+```
+
+A `.choice()` entry is either a constant [`ToolChoice`](https://ai-sdk.dev/docs/ai-sdk-core/tools-and-tool-calling#tool-choice) (`'auto'`, `'required'`, `'none'`, or `{ type: 'tool', toolName }` with `toolName` typed to your tools) or a **resolver**. The resolver runs inside `.inferTools()` with your toolset values (`{ messages, steps, context }`) and returns a `ToolChoice`, or `undefined` to leave the choice unconstrained (the AI SDK then defaults to `'auto'`). Since it sets a single value, it follows the same **last-call wins** rule as activation: the last entry decides, and a resolver returning `undefined` does not fall back to an earlier one, so express any fallback inside the resolver itself.
+
+> [!NOTE]
+> `toolChoice` is resolved independently of `activeTools` and passed through as-is. Because the AI SDK filters tools by `activeTools` first, forcing `{ type: 'tool', toolName }` for a tool you have deactivated leaves the model unable to see it and surfaces as a provider error, so keep a forced tool active.
+
+Resolving from `steps` makes it easy to guide a multi-step run. Call `.inferTools()` inside `prepareStep()` to recompute `toolChoice` (and `activeTools`) after each step, for example to force a tool on the first step and then hand control back to the model:
+
+```typescript
+import { generateText, stepCountIs } from 'ai';
+
+const toolSet = createToolSet({ tools }).choice(({ steps }) =>
+  steps?.length === 0 ? { type: 'tool', toolName: 'search' } : 'auto',
+);
+
+const { tools } = toolSet;
+
+const result = await generateText({
+  model,
+  tools,
+  stopWhen: stepCountIs(10),
+  prompt: 'Find my orders and cancel the unfulfilled one',
+  prepareStep: ({ steps }) => toolSet.inferTools({ steps }),
+});
 ```
 
 ### Immutable vs Mutable
@@ -420,32 +465,47 @@ Conditionally deactivate tools. The predicate receives `{ messages, steps, conte
 toolSet.deactivateWhen('search', ({ messages }) => messages && messages.length > 10);
 ```
 
+#### `.choice(entry)`
+
+Set the toolset's `toolChoice` to a constant `ToolChoice` (`'auto'`, `'none'`, `'required'`, or `{ type: 'tool', toolName }`) or a resolver. A resolver receives `{ messages, steps, context }` and returns a `ToolChoice`, or `undefined` to leave it unconstrained (omitted). Last-call wins. The resolved `toolChoice` is passed through as-is; keep a forced tool active so the AI SDK does not filter it out.
+
+```ts
+// Constant
+toolSet.choice('required');
+toolSet.choice({ type: 'tool', toolName: 'search' });
+
+// Resolver — force a tool on the first step, then let the model decide
+toolSet.choice(({ steps }) => (steps?.length === 0 ? { type: 'tool', toolName: 'search' } : 'auto'));
+```
+
 #### `.inferTools(input?)`
 
-Evaluate all predicates and return `{ tools, activeTools }`, directly spreadable into `generateText()` or `streamText()`. The input is optional; all fields are optional. Predicates receive `undefined` for fields not provided.
+Evaluate all predicates and the tool-choice entry and return `{ tools, activeTools, toolChoice }`, directly spreadable into `generateText()` or `streamText()`. The input is optional; all fields are optional. Predicates and resolvers receive `undefined` for fields not provided.
 
 - `input` (optional):
   - `messages` (optional), the current conversation messages
   - `steps` (optional), the completed steps of the current run (the `StepResult` array from `prepareStep`)
-  - `context` (optional), arbitrary values passed to predicates
+  - `context` (optional), arbitrary values passed to predicates and the tool-choice resolver
+
+The result also includes `toolChoice` when set via `.choice()` (otherwise `undefined`).
 
 ```ts
 // Static-only (no predicates)
-const { tools, activeTools } = toolSet.inferTools();
+const { tools, activeTools, toolChoice } = toolSet.inferTools();
 
 // With messages
-const { tools, activeTools } = toolSet.inferTools({ messages });
+const { tools, activeTools, toolChoice } = toolSet.inferTools({ messages });
 
 // With context
-const { tools, activeTools } = toolSet.inferTools({ context: { isAdmin: true } });
+const { tools, activeTools, toolChoice } = toolSet.inferTools({ context: { isAdmin: true } });
 
 // With steps (e.g. inside prepareStep)
-const { tools, activeTools } = toolSet.inferTools({ steps });
+const { tools, activeTools, toolChoice } = toolSet.inferTools({ steps });
 
 // With both
-const { tools, activeTools } = toolSet.inferTools({ messages, context });
+const { tools, activeTools, toolChoice } = toolSet.inferTools({ messages, context });
 
-const result = await generateText({ model, tools, activeTools, messages });
+const result = await generateText({ model, tools, activeTools, toolChoice, messages });
 ```
 
 #### `.clone(options?)`
