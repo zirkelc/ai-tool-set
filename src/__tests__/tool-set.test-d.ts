@@ -1,4 +1,4 @@
-import type { InferUITool, ModelMessage, StepResult, UIMessage } from 'ai';
+import type { InferUITool, ModelMessage, PrepareStepResult, StepResult, UIMessage } from 'ai';
 import { tool } from 'ai';
 import { describe, expectTypeOf, test } from 'vitest';
 import { z } from 'zod';
@@ -498,6 +498,62 @@ describe('immutable toolset', () => {
     });
   });
 
+  describe('choice', () => {
+    test('should accept the string toolChoice values', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      toolSet.choice('auto');
+      toolSet.choice('none');
+      toolSet.choice('required');
+    });
+
+    test('should accept a tool toolChoice with a known tool name', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      toolSet.choice({ type: 'tool', toolName: 'plain' });
+      toolSet.choice({ type: 'tool', toolName: 'cancel' });
+    });
+
+    test('should reject a tool toolChoice with an unknown tool name', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      // @ts-expect-error — 'unknown' is not in TOOLS
+      toolSet.choice({ type: 'tool', toolName: 'unknown' });
+    });
+
+    test('should type the resolver input as the inferTools input', () => {
+      type MyCtx = { isAdmin: boolean };
+      const toolSet = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS });
+      toolSet.choice((input) => {
+        expectTypeOf(input.toolSetContext).toEqualTypeOf<MyCtx | undefined>();
+        expectTypeOf(input.messages).toEqualTypeOf<Array<UIMessage> | undefined>();
+        return 'required';
+      });
+    });
+
+    test('should allow the resolver to return undefined', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      toolSet.choice(({ steps }) => (steps?.length ? 'auto' : undefined));
+    });
+
+    test('should type toolChoice on the inferTools result', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      const result = toolSet.inferTools();
+      expectTypeOf(result.toolChoice).toEqualTypeOf<
+        | 'auto'
+        | 'none'
+        | 'required'
+        | { type: 'tool'; toolName: 'plain' | 'calc' | 'cancel' | 'edit' | 'archive' }
+        | undefined
+      >();
+    });
+
+    test('should spread the inferTools result into a prepareStep return', () => {
+      const toolSet = createToolSet({ tools: TOOLS }).choice('required');
+      // The resolved `activeTools` + `toolChoice` are accepted by PrepareStepResult.
+      const prepareStep = ({ steps }: { steps: Array<StepResult<typeof TOOLS>> }): PrepareStepResult<typeof TOOLS> =>
+        toolSet.inferTools({ steps });
+      expectTypeOf(prepareStep).toBeFunction();
+    });
+  });
+
   describe('clone', () => {
     test('should return immutable toolset by default', () => {
       const toolSet = createToolSet({ tools: TOOLS });
@@ -617,6 +673,20 @@ describe('mutable toolset', () => {
       toolSet.deactivateWhen('plain', () => undefined);
       toolSet.activateWhen('cancel', ({ messages }) => messages?.some((m) => m.parts.length > 0));
       toolSet.deactivateWhen('plain', ({ messages }) => messages?.some((m) => m.parts.length > 0));
+    });
+  });
+
+  describe('choice', () => {
+    test('should return this', () => {
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true });
+      const result = toolSet.choice('required');
+      expectTypeOf(result).toEqualTypeOf(toolSet);
+    });
+
+    test('should reject a tool toolChoice with an unknown tool name', () => {
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true });
+      // @ts-expect-error — 'unknown' is not in TOOLS
+      toolSet.choice({ type: 'tool', toolName: 'unknown' });
     });
   });
 

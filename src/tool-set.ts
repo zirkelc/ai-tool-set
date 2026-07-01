@@ -6,6 +6,7 @@ import type {
   StepResult,
   Tool,
   ToolApprovalStatus,
+  ToolChoice,
   UIMessage,
 } from 'ai';
 
@@ -125,6 +126,29 @@ type StoredApprovalEntry = {
   value: AnyApprovalEntry;
 };
 
+/**
+ * Resolves the toolset's `toolChoice` at `inferTools()` time from the toolset's own values
+ * (`toolSetContext`, your `messages`, `steps`). Returns a {@link ToolChoice} to force, or
+ * `undefined` to leave the choice unconstrained (omitted, so the AI SDK defaults to `'auto'`).
+ */
+type ToolChoiceResolver<
+  TOOLS extends ToolRecord = ToolRecord,
+  MESSAGE extends MessageType = UIMessage,
+  TOOLSET_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
+  RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
+> = (input: InferToolsInput<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>) => ToolChoice<TOOLS> | undefined;
+
+/** A tool-choice entry for the toolset — a constant {@link ToolChoice} or a resolver. */
+type ToolChoiceEntry<
+  TOOLS extends ToolRecord = ToolRecord,
+  MESSAGE extends MessageType = UIMessage,
+  TOOLSET_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
+  RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
+> = ToolChoice<TOOLS> | ToolChoiceResolver<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>;
+
+/** Any tool-choice entry value, for internal storage. */
+type AnyToolChoiceEntry = ToolChoice<any> | ToolChoiceResolver<any, any, any, any>;
+
 /** The resolved `toolApproval` record, ready to pass to `generateText`/`streamText`/`Agent`. */
 type ResolvedToolApproval<
   TOOLS extends ToolRecord,
@@ -143,6 +167,7 @@ type ResolvedToolSet<
   tools: TOOLS;
   activeTools: Array<keyof TOOLS & string>;
   toolApproval: ResolvedToolApproval<TOOLS, RUNTIME_CONTEXT>;
+  toolChoice?: ToolChoice<TOOLS>;
 };
 
 /** Union of both toolset classes for type utility constraints. */
@@ -229,15 +254,18 @@ class ToolSetState<
   readonly #tools: TOOLS;
   readonly #activationEntries: Array<StoredActivationEntry>;
   readonly #approvalEntries: Array<StoredApprovalEntry>;
+  readonly #toolChoiceEntries: Array<AnyToolChoiceEntry>;
 
   constructor(
     tools: TOOLS,
     activationEntries: Array<StoredActivationEntry>,
     approvalEntries: Array<StoredApprovalEntry> = [],
+    toolChoiceEntries: Array<AnyToolChoiceEntry> = [],
   ) {
     this.#tools = tools;
     this.#activationEntries = activationEntries;
     this.#approvalEntries = approvalEntries;
+    this.#toolChoiceEntries = toolChoiceEntries;
   }
 
   /** All tools as a standard AI SDK tool record. */
@@ -247,12 +275,22 @@ class ToolSetState<
 
   activate(names: Array<string>): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
     const newEntries = names.map((name) => ({ toolName: name, resolve: () => true }));
-    return new ToolSetState(this.#tools, [...this.#activationEntries, ...newEntries], this.#approvalEntries);
+    return new ToolSetState(
+      this.#tools,
+      [...this.#activationEntries, ...newEntries],
+      this.#approvalEntries,
+      this.#toolChoiceEntries,
+    );
   }
 
   deactivate(names: Array<string>): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
     const newEntries = names.map((name) => ({ toolName: name, resolve: () => false }));
-    return new ToolSetState(this.#tools, [...this.#activationEntries, ...newEntries], this.#approvalEntries);
+    return new ToolSetState(
+      this.#tools,
+      [...this.#activationEntries, ...newEntries],
+      this.#approvalEntries,
+      this.#toolChoiceEntries,
+    );
   }
 
   activateWhen(
@@ -265,6 +303,7 @@ class ToolSetState<
       this.#tools,
       [...this.#activationEntries, ...toActivationEntries(nameOrPredicates, predicate)],
       this.#approvalEntries,
+      this.#toolChoiceEntries,
     );
   }
 
@@ -278,26 +317,51 @@ class ToolSetState<
       ...e,
       resolve: (input: InferToolsInput<any, any, any, any>) => !e.resolve(input),
     }));
-    return new ToolSetState(this.#tools, [...this.#activationEntries, ...newEntries], this.#approvalEntries);
+    return new ToolSetState(
+      this.#tools,
+      [...this.#activationEntries, ...newEntries],
+      this.#approvalEntries,
+      this.#toolChoiceEntries,
+    );
   }
 
   approve(names: Array<string>): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
     const newEntries = names.map((name) => ({ toolName: name, value: 'approved' as ToolApprovalStatus }));
-    return new ToolSetState(this.#tools, this.#activationEntries, [...this.#approvalEntries, ...newEntries]);
+    return new ToolSetState(
+      this.#tools,
+      this.#activationEntries,
+      [...this.#approvalEntries, ...newEntries],
+      this.#toolChoiceEntries,
+    );
   }
 
   deny(names: Array<string>): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
     const newEntries = names.map((name) => ({ toolName: name, value: 'denied' as ToolApprovalStatus }));
-    return new ToolSetState(this.#tools, this.#activationEntries, [...this.#approvalEntries, ...newEntries]);
+    return new ToolSetState(
+      this.#tools,
+      this.#activationEntries,
+      [...this.#approvalEntries, ...newEntries],
+      this.#toolChoiceEntries,
+    );
   }
 
   approval(
     nameOrEntries: string | Partial<Record<string, AnyApprovalEntry>>,
     entry?: AnyApprovalEntry,
   ): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
-    return new ToolSetState(this.#tools, this.#activationEntries, [
-      ...this.#approvalEntries,
-      ...toApprovalEntries(nameOrEntries, entry),
+    return new ToolSetState(
+      this.#tools,
+      this.#activationEntries,
+      [...this.#approvalEntries, ...toApprovalEntries(nameOrEntries, entry)],
+      this.#toolChoiceEntries,
+    );
+  }
+
+  /** Set the toolset's `toolChoice` — a constant {@link ToolChoice} or a resolver. Last-call wins. */
+  choice(entry: AnyToolChoiceEntry): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
+    return new ToolSetState(this.#tools, this.#activationEntries, this.#approvalEntries, [
+      ...this.#toolChoiceEntries,
+      entry,
     ]);
   }
 
@@ -322,10 +386,17 @@ class ToolSetState<
       toolApproval[name] = resolved;
     }
 
+    /** The last `choice()` entry wins; a resolver runs now with the toolset values. */
+    const lastToolChoice = this.#toolChoiceEntries.at(-1);
+    const toolChoice = (typeof lastToolChoice === 'function' ? lastToolChoice(input ?? {}) : lastToolChoice) as
+      | ToolChoice<TOOLS>
+      | undefined;
+
     return {
       tools: this.#tools,
       activeTools,
       toolApproval: toolApproval as ResolvedToolApproval<TOOLS, RUNTIME_CONTEXT>,
+      toolChoice,
     };
   }
 }
@@ -456,7 +527,18 @@ class ImmutableToolSet<
     return new ImmutableToolSet(this.#state.approval(nameOrEntries, entry));
   }
 
-  /** Evaluate all predicates and resolvers. Returns resolved `{ tools, activeTools, toolApproval }`. */
+  /**
+   * Set the toolset's `toolChoice` — a constant `ToolChoice` (`'auto'`, `'none'`, `'required'`, or
+   * `{ type: 'tool', toolName }`) or a resolver that runs at `inferTools()` time with the toolset
+   * values and returns a `ToolChoice` (or `undefined` to leave it unconstrained). Last-call wins.
+   */
+  choice(
+    entry: ToolChoiceEntry<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
+  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED> {
+    return new ImmutableToolSet(this.#state.choice(entry));
+  }
+
+  /** Evaluate all predicates and resolvers. Returns resolved `{ tools, activeTools, toolApproval, toolChoice }`. */
   inferTools(
     input?: InferToolsInput<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
   ): ResolvedToolSet<TOOLS, RUNTIME_CONTEXT> {
@@ -582,7 +664,17 @@ class MutableToolSet<
     return this;
   }
 
-  /** Evaluate all predicates and resolvers. Returns resolved `{ tools, activeTools, toolApproval }`. */
+  /**
+   * Set the toolset's `toolChoice` — a constant `ToolChoice` (`'auto'`, `'none'`, `'required'`, or
+   * `{ type: 'tool', toolName }`) or a resolver that runs at `inferTools()` time with the toolset
+   * values and returns a `ToolChoice` (or `undefined` to leave it unconstrained). Last-call wins.
+   */
+  choice(entry: ToolChoiceEntry<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>): this {
+    this.#state = this.#state.choice(entry);
+    return this;
+  }
+
+  /** Evaluate all predicates and resolvers. Returns resolved `{ tools, activeTools, toolApproval, toolChoice }`. */
   inferTools(
     input?: InferToolsInput<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
   ): ResolvedToolSet<TOOLS, RUNTIME_CONTEXT> {

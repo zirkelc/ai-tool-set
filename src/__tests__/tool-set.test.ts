@@ -7,6 +7,9 @@ import { TOOLS, UIMessages } from './fixtures.js';
 const getToolNames = (model: MockLanguageModel, callIndex = 0) =>
   model.doGenerate.mock.calls[callIndex]?.[0]?.tools?.map((t) => t.name) ?? [];
 
+const getToolChoice = (model: MockLanguageModel, callIndex = 0) =>
+  model.doGenerate.mock.calls[callIndex]?.[0]?.toolChoice;
+
 /** Build a minimal step whose tool calls reference the given tool names. */
 const stepWith = (...toolNames: Array<keyof typeof TOOLS & string>): StepResult<typeof TOOLS> => {
   const calls = toolNames.map((toolName) => ({ toolName }));
@@ -603,6 +606,89 @@ describe('immutable toolset', () => {
     });
   });
 
+  describe('choice', () => {
+    test('should be undefined when no choice is set', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS });
+
+      // Act
+      const { toolChoice } = toolSet.inferTools();
+
+      // Assert
+      expect(toolChoice).toBeUndefined();
+    });
+
+    test('should resolve a static string toolChoice', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).choice('required');
+
+      // Act
+      const { toolChoice } = toolSet.inferTools();
+
+      // Assert
+      expect(toolChoice).toBe('required');
+    });
+
+    test('should resolve a static tool toolChoice', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).choice({ type: 'tool', toolName: 'plain' });
+
+      // Act
+      const { toolChoice } = toolSet.inferTools();
+
+      // Assert
+      expect(toolChoice).toEqual({ type: 'tool', toolName: 'plain' });
+    });
+
+    test('should resolve toolChoice from a resolver using steps', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).choice(({ steps }) =>
+        steps?.length ? 'auto' : { type: 'tool', toolName: 'plain' },
+      );
+
+      // Act
+      const firstStep = toolSet.inferTools({ steps: [] }).toolChoice;
+      const laterStep = toolSet.inferTools({ steps: [stepWith('plain')] }).toolChoice;
+
+      // Assert
+      expect(firstStep).toEqual({ type: 'tool', toolName: 'plain' });
+      expect(laterStep).toBe('auto');
+    });
+
+    test('should be undefined when the resolver returns undefined', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).choice(() => undefined);
+
+      // Act
+      const { toolChoice } = toolSet.inferTools();
+
+      // Assert
+      expect(toolChoice).toBeUndefined();
+    });
+
+    test('should follow last-call wins', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).choice('required').choice('none');
+
+      // Act
+      const { toolChoice } = toolSet.inferTools();
+
+      // Assert
+      expect(toolChoice).toBe('none');
+    });
+
+    test('should not mutate the original toolset', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).choice('required');
+
+      // Act
+      toolSet.choice('none');
+
+      // Assert
+      expect(toolSet.inferTools().toolChoice).toBe('required');
+    });
+  });
+
   describe('chaining', () => {
     test('should support method chaining', () => {
       // Arrange & Act
@@ -686,6 +772,46 @@ describe('immutable toolset', () => {
       expect(toolNames.length).toBe(2);
       expect(toolNames).toContain('plain');
       expect(toolNames).toContain('calc');
+    });
+
+    test('should forward the resolved toolChoice to the model', async () => {
+      // Arrange — force the `plain` tool via choice
+      const model = MockLanguageModel.from({
+        content: [Language.toolCall({ toolCallId: 'call-1', toolName: 'plain', input: { query: 'search' } })],
+      });
+      const toolSet = createToolSet({ tools: TOOLS }).choice({ type: 'tool', toolName: 'plain' });
+
+      // Act
+      await generateText({ model, ...toolSet.inferTools(), prompt: 'Hello' });
+
+      // Assert
+      expect(getToolChoice(model)).toEqual({ type: 'tool', toolName: 'plain' });
+    });
+
+    /**
+     * Edge case: choice forces a tool that activeTools deactivates. The AI SDK filters tools by
+     * activeTools first, so the forced tool is dropped from the list sent to the model, yet the
+     * toolChoice is forwarded unchanged — the model receives a toolChoice pointing at a tool it
+     * cannot see. A real provider rejects this; here we observe the mismatch the SDK passes through.
+     */
+    test('should forward a toolChoice for a deactivated tool without the tool', async () => {
+      // Arrange — `cancel` is deactivated but also forced via choice
+      const model = MockLanguageModel.from('Done');
+      const toolSet = createToolSet({ tools: TOOLS })
+        .deactivate(['cancel'])
+        .choice({ type: 'tool', toolName: 'cancel' });
+
+      // Act
+      const { activeTools, toolChoice } = toolSet.inferTools();
+      await generateText({ model, ...toolSet.inferTools(), prompt: 'Hello' });
+
+      // Assert — inferTools resolves the conflicting pair as-is (no validation, no auto-activation)
+      expect(activeTools).not.toContain('cancel');
+      expect(toolChoice).toEqual({ type: 'tool', toolName: 'cancel' });
+
+      // Assert — the SDK drops `cancel` from the tools but still forwards the forced toolChoice
+      expect(getToolNames(model)).not.toContain('cancel');
+      expect(getToolChoice(model)).toEqual({ type: 'tool', toolName: 'cancel' });
     });
 
     test('should execute an active tool the model calls', async () => {
@@ -1105,6 +1231,30 @@ describe('mutable toolset', () => {
 
       // Assert
       expect(activeTools).toContain('cancel');
+    });
+  });
+
+  describe('choice', () => {
+    test('should mutate in-place and return this', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true });
+
+      // Act
+      const result = toolSet.choice('required');
+
+      // Assert
+      expect(result).toBe(toolSet);
+    });
+
+    test('should resolve toolChoice and follow last-call wins', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true });
+
+      // Act
+      toolSet.choice('required').choice('none');
+
+      // Assert
+      expect(toolSet.inferTools().toolChoice).toBe('none');
     });
   });
 
