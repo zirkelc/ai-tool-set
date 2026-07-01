@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.4.0](https://github.com/zirkelc/ai-tool-set/compare/v1.3.0...v1.4.0) (2026-07-01)
+
+
+### Features
+
+* add tool choice with .choice() ([c147463](https://github.com/zirkelc/ai-tool-set/commit/c14746361ccf4cf8b1e02ccd79ba79ccba7e660b))
+
+
+### Continuous Integration
+
+* publish the v1 line under the v1 dist-tag ([ae56a7a](https://github.com/zirkelc/ai-tool-set/commit/ae56a7a763b66c7d4a70cbb523e8d40e3025a313))
+* use the `legacy` dist-tag for the v1 line ([fb332db](https://github.com/zirkelc/ai-tool-set/commit/fb332db198bf00c3a16a8554c94413e9ef3c18cc))
+
 ## [1.3.0](https://github.com/zirkelc/ai-tool-set/compare/v1.2.4...v1.3.0) (2026-06-29)
 
 
