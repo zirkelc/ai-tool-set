@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/zirkelc/ai-tool-set/compare/v2.1.0...v2.2.0) (2026-07-01)
+
+
+### Features
+
+* add tool choice with .choice() ([1aee055](https://github.com/zirkelc/ai-tool-set/commit/1aee055799a9c84cfd19eaf613e021ae424746b1))
+
 ## [2.1.0](https://github.com/zirkelc/ai-tool-set/compare/v2.0.0...v2.1.0) (2026-06-29)
 
 
