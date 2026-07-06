@@ -23,7 +23,7 @@ The AI SDK provides an `activeTools` parameter to control which tools the model 
 - **Control tool approval**: Some tools should require human approval, or be auto-approved or denied based on context
 - **Force tool choice**: Sometimes the model should be required to call a specific tool, or any tool, based on context
 
-This library wraps standard AI SDK `tool()` definitions with chainable activation, approval, and choice methods, and resolves `tools`, `activeTools`, `toolApproval`, and `toolChoice` for any AI SDK function.
+This library wraps standard AI SDK [`tool()`](https://ai-sdk.dev/docs/reference/ai-sdk-core/tool) definitions with chainable activation, approval, and choice methods, and resolves `tools`, `activeTools`, `toolApproval`, and `toolChoice` for any AI SDK function.
 
 ### Installation
 
@@ -167,7 +167,7 @@ const { tools, activeTools } = toolSet.inferTools({ messages, toolSetContext });
 const result = await generateText({ model, tools, activeTools, messages });
 ```
 
-In a multi-step run, you can call `.inferTools()` inside `prepareStep()` to re-evaluate active tools after each step. Here you also have access to the `steps` array, which contains the completed steps of the current run:
+In a multi-step run, you can call `.inferTools()` inside [`prepareStep()`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text) to re-evaluate active tools after each step. Here you also have access to the `steps` array, which contains the completed steps of the current run:
 
 ```typescript
 import { generateText, stepCountIs } from 'ai';
@@ -322,6 +322,9 @@ const result = await generateText({
 
 ### Stable Tool Order
 
+> [!NOTE]
+> Tool ordering requires AI SDK v7 and `ai-tool-set@2.x`
+
 The AI SDK sends tools to the provider in the **insertion order** of the `tools` record, filtered by `activeTools`, unless you override it with the [`toolOrder`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text) parameter. When you toggle tools with [conditional activation](#conditional-activation), a dynamic tool in the middle of the record shifts every tool after it as it flips on and off, which can invalidate the provider's prompt cache for the tool block.
 
 `ai-tool-set` resolves this into a `toolOrder` for you. **By default it uses `'stable'`**: always-active (static) tools stay in a fixed prefix and conditionally-activated (dynamic) tools sort to the tail, so the static prefix stays byte-identical as the dynamic tools toggle. `.inferTools()` returns `toolOrder` next to `activeTools`, and because it is a value (not a reordered record) it flows through `prepareStep` — keeping the order stable across every step of a run:
@@ -470,7 +473,7 @@ type MyUIMessage = UIMessage<unknown, any, MyToolSet>;
 
 ### UIMessage vs ModelMessage
 
-The second generic `MESSAGE` of `createToolSet()` defaults to `UIMessage` and types the messages passed to predicates and `inferTools()`. If you already have a custom `UIMessage` type, you can pass it to make messages fully typed:
+The second generic `MESSAGE` of `createToolSet()` defaults to [`UIMessage`](https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message) and types the messages passed to predicates and `inferTools()`. If you already have a custom `UIMessage` type, you can pass it to make messages fully typed:
 
 ```typescript
 import { myTools } from './my-tools.js';
@@ -486,7 +489,7 @@ const toolSet = createToolSet<typeof myTools, MyUIMessage>({ tools: myTools }).a
 const { tools, activeTools } = toolSet.inferTools({ messages });
 ```
 
-If you rather work with model messages than UI messages, you can pass `ModelMessage` instead. This is useful if you want to call `inferTools()` inside the `prepareStep()` callback, where you only have access to model messages:
+If you rather work with model messages than UI messages, you can pass [`ModelMessage`](https://ai-sdk.dev/docs/reference/ai-sdk-core/model-message) instead. This is useful if you want to call `inferTools()` inside the `prepareStep()` callback, where you only have access to model messages:
 
 ```typescript
 import { myTools } from './my-tools.js';
@@ -699,7 +702,7 @@ Evaluate all predicates, approval resolvers, the tool-choice entry, and the orde
 
 - `input` (optional):
   - `messages` (optional), the current conversation messages
-  - `steps` (optional), the completed steps of the current run (the `StepResult` array from `prepareStep`)
+  - `steps` (optional), the completed steps of the current run (the [`StepResult`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text) array from `prepareStep`)
   - `toolSetContext` (optional), arbitrary values passed to predicates, approval resolvers, and the tool-choice resolver
 
 The result includes `toolChoice` when set via `.choice()` (otherwise `undefined`), and `toolOrder` when `.order()` is anything other than `'insertion'` (otherwise `undefined`).
