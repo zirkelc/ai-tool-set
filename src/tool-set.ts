@@ -86,6 +86,8 @@ type ActivationPredicate<
 type StoredActivationEntry = {
   toolName: string;
   resolve: (input: InferToolsInput<any, any, any, any>) => boolean | undefined;
+  /** True when the entry came from a conditional method (`activateWhen`/`deactivateWhen`). */
+  dynamic: boolean;
 };
 
 /**
@@ -149,6 +151,70 @@ type ToolChoiceEntry<
 /** Any tool-choice entry value, for internal storage. */
 type AnyToolChoiceEntry = ToolChoice<any> | ToolChoiceResolver<any, any, any, any>;
 
+/** Metadata for one tool, passed to a manual {@link ToolComparator}. */
+type ToolOrderEntry = {
+  /** Tool name (record key). */
+  toolName: string;
+  /** The tool definition. */
+  tool: Tool;
+  /** True when activation depends on a runtime predicate (`activateWhen`/`deactivateWhen`). */
+  dynamic: boolean;
+  /** Original insertion index in the `tools` record, for stable tie-breaking. */
+  index: number;
+};
+
+/** A manual comparator over {@link ToolOrderEntry} values, matching `Array.prototype.sort`. */
+type ToolComparator = (a: ToolOrderEntry, b: ToolOrderEntry) => number;
+
+/**
+ * How to order the tools sent to the provider.
+ *
+ * `inferTools()` resolves this into a `toolOrder` array — the AI SDK's own
+ * [`toolOrder`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text) parameter — that spreads
+ * straight into `generateText`/`streamText` and into `prepareStep`'s return, so the order applies
+ * per step without reordering the `tools` record itself.
+ *
+ * - `'stable'` — static tools first (in insertion order), conditionally-activated tools to the tail.
+ *   Keeps the prompt's static tool prefix byte-identical when a dynamic tool toggles, which preserves
+ *   provider prompt caching. This is the default.
+ * - `'insertion'` — as declared in the `tools` record (resolves to no `toolOrder`).
+ * - `Array<string>` — explicit order; names not listed keep insertion order after the listed ones.
+ * - {@link ToolComparator} — full manual control (e.g. `(a, b) => a.toolName.localeCompare(b.toolName)`).
+ */
+type ToolOrderStrategy<TOOLS extends ToolRecord = ToolRecord> =
+  | 'stable'
+  | 'insertion'
+  | Array<keyof TOOLS & string>
+  | ToolComparator;
+
+/** Build a name comparator from a {@link ToolOrderStrategy} and per-tool metadata. */
+const toOrderComparator = (
+  order: ToolOrderStrategy<any>,
+  entries: Map<string, ToolOrderEntry>,
+): ((a: string, b: string) => number) => {
+  if (typeof order === 'function') {
+    return (a, b) => order(entries.get(a)!, entries.get(b)!);
+  }
+  if (Array.isArray(order)) {
+    const rank = new Map(order.map((name, i) => [name, i] as const));
+    return (a, b) => {
+      const ra = rank.get(a) ?? Number.POSITIVE_INFINITY;
+      const rb = rank.get(b) ?? Number.POSITIVE_INFINITY;
+      return ra - rb || entries.get(a)!.index - entries.get(b)!.index;
+    };
+  }
+  if (order === 'stable') {
+    return (a, b) => {
+      const ea = entries.get(a)!;
+      const eb = entries.get(b)!;
+      /** static (false → 0) before dynamic (true → 1); ties keep insertion order. */
+      return Number(ea.dynamic) - Number(eb.dynamic) || ea.index - eb.index;
+    };
+  }
+  /** 'insertion' */
+  return (a, b) => entries.get(a)!.index - entries.get(b)!.index;
+};
+
 /** The resolved `toolApproval` record, ready to pass to `generateText`/`streamText`/`Agent`. */
 type ResolvedToolApproval<
   TOOLS extends ToolRecord,
@@ -159,7 +225,7 @@ type ResolvedToolApproval<
     | SingleToolApprovalFunction<InferToolInput<TOOLS[K]>, InferToolContext<TOOLS[K]>, RUNTIME_CONTEXT>;
 };
 
-/** Resolved tools, active tool names, and approval record returned by `inferTools()`. */
+/** Resolved tools, active tool names, approval record, choice, and order returned by `inferTools()`. */
 type ResolvedToolSet<
   TOOLS extends ToolRecord,
   RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
@@ -168,6 +234,11 @@ type ResolvedToolSet<
   activeTools: Array<keyof TOOLS & string>;
   toolApproval: ResolvedToolApproval<TOOLS, RUNTIME_CONTEXT>;
   toolChoice?: ToolChoice<TOOLS>;
+  /**
+   * The AI SDK `toolOrder` — active-and-inactive tool names in the resolved order, or `undefined`
+   * for `'insertion'` (the SDK's default). Spreads into `generateText`/`streamText` and `prepareStep`.
+   */
+  toolOrder?: Array<keyof TOOLS & string>;
 };
 
 /** Union of both toolset classes for type utility constraints. */
@@ -219,11 +290,11 @@ const toActivationEntries = (
   predicate?: ActivationPredicate<any, any, any, any>,
 ): Array<StoredActivationEntry> => {
   if (typeof nameOrPredicates === 'string') {
-    return [{ toolName: nameOrPredicates, resolve: predicate! }];
+    return [{ toolName: nameOrPredicates, resolve: predicate!, dynamic: true }];
   }
   return Object.entries(nameOrPredicates)
     .filter(([, pred]) => pred != null)
-    .map(([name, pred]) => ({ toolName: name, resolve: pred! }));
+    .map(([name, pred]) => ({ toolName: name, resolve: pred!, dynamic: true }));
 };
 
 const toApprovalEntries = (
@@ -255,17 +326,20 @@ class ToolSetState<
   readonly #activationEntries: Array<StoredActivationEntry>;
   readonly #approvalEntries: Array<StoredApprovalEntry>;
   readonly #toolChoiceEntries: Array<AnyToolChoiceEntry>;
+  readonly #order: ToolOrderStrategy<any>;
 
   constructor(
     tools: TOOLS,
     activationEntries: Array<StoredActivationEntry>,
     approvalEntries: Array<StoredApprovalEntry> = [],
     toolChoiceEntries: Array<AnyToolChoiceEntry> = [],
+    order: ToolOrderStrategy<any> = 'stable',
   ) {
     this.#tools = tools;
     this.#activationEntries = activationEntries;
     this.#approvalEntries = approvalEntries;
     this.#toolChoiceEntries = toolChoiceEntries;
+    this.#order = order;
   }
 
   /** All tools as a standard AI SDK tool record. */
@@ -274,22 +348,24 @@ class ToolSetState<
   }
 
   activate(names: Array<string>): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
-    const newEntries = names.map((name) => ({ toolName: name, resolve: () => true }));
+    const newEntries = names.map((name) => ({ toolName: name, resolve: () => true, dynamic: false }));
     return new ToolSetState(
       this.#tools,
       [...this.#activationEntries, ...newEntries],
       this.#approvalEntries,
       this.#toolChoiceEntries,
+      this.#order,
     );
   }
 
   deactivate(names: Array<string>): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
-    const newEntries = names.map((name) => ({ toolName: name, resolve: () => false }));
+    const newEntries = names.map((name) => ({ toolName: name, resolve: () => false, dynamic: false }));
     return new ToolSetState(
       this.#tools,
       [...this.#activationEntries, ...newEntries],
       this.#approvalEntries,
       this.#toolChoiceEntries,
+      this.#order,
     );
   }
 
@@ -304,6 +380,7 @@ class ToolSetState<
       [...this.#activationEntries, ...toActivationEntries(nameOrPredicates, predicate)],
       this.#approvalEntries,
       this.#toolChoiceEntries,
+      this.#order,
     );
   }
 
@@ -322,6 +399,7 @@ class ToolSetState<
       [...this.#activationEntries, ...newEntries],
       this.#approvalEntries,
       this.#toolChoiceEntries,
+      this.#order,
     );
   }
 
@@ -332,6 +410,7 @@ class ToolSetState<
       this.#activationEntries,
       [...this.#approvalEntries, ...newEntries],
       this.#toolChoiceEntries,
+      this.#order,
     );
   }
 
@@ -342,6 +421,7 @@ class ToolSetState<
       this.#activationEntries,
       [...this.#approvalEntries, ...newEntries],
       this.#toolChoiceEntries,
+      this.#order,
     );
   }
 
@@ -354,15 +434,30 @@ class ToolSetState<
       this.#activationEntries,
       [...this.#approvalEntries, ...toApprovalEntries(nameOrEntries, entry)],
       this.#toolChoiceEntries,
+      this.#order,
     );
   }
 
   /** Set the toolset's `toolChoice` — a constant {@link ToolChoice} or a resolver. Last-call wins. */
   choice(entry: AnyToolChoiceEntry): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
-    return new ToolSetState(this.#tools, this.#activationEntries, this.#approvalEntries, [
-      ...this.#toolChoiceEntries,
-      entry,
-    ]);
+    return new ToolSetState(
+      this.#tools,
+      this.#activationEntries,
+      this.#approvalEntries,
+      [...this.#toolChoiceEntries, entry],
+      this.#order,
+    );
+  }
+
+  /** Set the ordering strategy resolved into `toolOrder`. Last-call wins. */
+  order(order: ToolOrderStrategy<TOOLS>): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
+    return new ToolSetState(
+      this.#tools,
+      this.#activationEntries,
+      this.#approvalEntries,
+      this.#toolChoiceEntries,
+      order,
+    );
   }
 
   /** Evaluate all predicates and resolvers with the provided input. */
@@ -370,8 +465,12 @@ class ToolSetState<
     input?: InferToolsInput<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
   ): ResolvedToolSet<TOOLS, RUNTIME_CONTEXT> {
     const allNames = Object.keys(this.#tools) as Array<keyof TOOLS & string>;
-    const activeTools = allNames.filter((name) => {
+
+    /** Per-tool metadata for ordering; the `index` doubles as insertion order. */
+    const orderEntries = new Map<string, ToolOrderEntry>();
+    const activeTools = allNames.filter((name, index) => {
       const lastEntry = this.#activationEntries.findLast((e) => e.toolName === name);
+      orderEntries.set(name, { toolName: name, tool: this.#tools[name]!, dynamic: lastEntry?.dynamic ?? false, index });
       if (!lastEntry) return true;
       return lastEntry.resolve(input ?? {});
     });
@@ -392,11 +491,21 @@ class ToolSetState<
       | ToolChoice<TOOLS>
       | undefined;
 
+    /**
+     * Resolve the AI SDK `toolOrder` from the strategy: all tool names in sorted order. `'insertion'`
+     * resolves to `undefined` so the default is a true no-op (the SDK keeps the record's own order).
+     */
+    const toolOrder =
+      this.#order === 'insertion'
+        ? undefined
+        : ([...allNames].sort(toOrderComparator(this.#order, orderEntries)) as Array<keyof TOOLS & string>);
+
     return {
       tools: this.#tools,
       activeTools,
       toolApproval: toolApproval as ResolvedToolApproval<TOOLS, RUNTIME_CONTEXT>,
       toolChoice,
+      toolOrder,
     };
   }
 }
@@ -538,7 +647,18 @@ class ImmutableToolSet<
     return new ImmutableToolSet(this.#state.choice(entry));
   }
 
-  /** Evaluate all predicates and resolvers. Returns resolved `{ tools, activeTools, toolApproval, toolChoice }`. */
+  /**
+   * Set how tools are ordered for the provider, resolved into `toolOrder`: a preset
+   * (`'insertion'`, `'stable'`), an explicit `Array` of tool names, or a comparator.
+   * Defaults to `'stable'`. Last-call wins.
+   */
+  order(
+    order: ToolOrderStrategy<TOOLS>,
+  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED> {
+    return new ImmutableToolSet(this.#state.order(order));
+  }
+
+  /** Evaluate all predicates and resolvers. Returns resolved `{ tools, activeTools, toolApproval, toolChoice, toolOrder }`. */
   inferTools(
     input?: InferToolsInput<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
   ): ResolvedToolSet<TOOLS, RUNTIME_CONTEXT> {
@@ -674,7 +794,17 @@ class MutableToolSet<
     return this;
   }
 
-  /** Evaluate all predicates and resolvers. Returns resolved `{ tools, activeTools, toolApproval, toolChoice }`. */
+  /**
+   * Set how tools are ordered for the provider, resolved into `toolOrder`: a preset
+   * (`'insertion'`, `'stable'`), an explicit `Array` of tool names, or a comparator.
+   * Defaults to `'stable'`. Last-call wins.
+   */
+  order(order: ToolOrderStrategy<TOOLS>): this {
+    this.#state = this.#state.order(order);
+    return this;
+  }
+
+  /** Evaluate all predicates and resolvers. Returns resolved `{ tools, activeTools, toolApproval, toolChoice, toolOrder }`. */
   inferTools(
     input?: InferToolsInput<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
   ): ResolvedToolSet<TOOLS, RUNTIME_CONTEXT> {
@@ -698,6 +828,8 @@ class MutableToolSet<
 type CreateToolSetOptions<TOOLS extends ToolRecord> = {
   tools: TOOLS;
   mutable?: boolean;
+  /** Ordering strategy resolved into `toolOrder`. Defaults to `'stable'`. */
+  order?: ToolOrderStrategy<TOOLS>;
 };
 
 /**
@@ -725,6 +857,6 @@ export function createToolSet<
   options: CreateToolSetOptions<TOOLS> & { mutable?: false },
 ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, keyof TOOLS & string>;
 export function createToolSet(options: CreateToolSetOptions<ToolRecord>): AnyToolSet {
-  const state = new ToolSetState(options.tools, []);
+  const state = new ToolSetState(options.tools, [], [], [], options.order ?? 'stable');
   return options.mutable ? new MutableToolSet(state) : new ImmutableToolSet(state);
 }

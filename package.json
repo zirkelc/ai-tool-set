@@ -34,11 +34,12 @@
     "prepare": "husky"
   },
   "devDependencies": {
+    "@ai-sdk/openai": "^4.0.8",
     "@arethetypeswrong/cli": "^0.18.2",
     "@total-typescript/tsconfig": "^1.0.4",
     "@types/node": "^25.5.2",
-    "ai": "7.0.0",
-    "ai-test-kit": "3.0.0-next.1",
+    "ai": "7.0.15",
+    "ai-test-kit": "3.0.1",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "oxfmt": "^0.44.0",

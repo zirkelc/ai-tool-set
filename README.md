@@ -320,6 +320,56 @@ const result = await generateText({
 });
 ```
 
+### Stable Tool Order
+
+The AI SDK sends tools to the provider in the **insertion order** of the `tools` record, filtered by `activeTools`, unless you override it with the [`toolOrder`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text) parameter. When you toggle tools with [conditional activation](#conditional-activation), a dynamic tool in the middle of the record shifts every tool after it as it flips on and off, which can invalidate the provider's prompt cache for the tool block.
+
+`ai-tool-set` resolves this into a `toolOrder` for you. **By default it uses `'stable'`**: always-active (static) tools stay in a fixed prefix and conditionally-activated (dynamic) tools sort to the tail, so the static prefix stays byte-identical as the dynamic tools toggle. `.inferTools()` returns `toolOrder` next to `activeTools`, and because it is a value (not a reordered record) it flows through `prepareStep` — keeping the order stable across every step of a run:
+
+```typescript
+import { generateText, stepCountIs } from 'ai';
+
+// Stable tool ordering is default when omitted
+const toolSet = createToolSet({ tools, order: 'stable' })
+  // list_orders drops out once it has been called this run
+  .deactivateWhen('list_orders', ({ steps }) =>
+    steps?.some((s) => s.staticToolCalls.some((c) => c.toolName === 'list_orders')),
+  );
+
+await generateText({
+  model,
+  tools,
+  stopWhen: stepCountIs(10),
+  prepareStep: ({ steps }) => {
+    // activeTools + toolOrder recomputed per step; the static prefix never shifts
+    const { activeTools, toolOrder } = toolSet.inferTools({ steps });
+    return { activeTools, toolOrder };
+  },
+});
+```
+
+For a single call, spread the whole result including `tools`, `activeTools`, and `toolOrder` directly:
+
+```typescript
+await generateText({ model, ...toolSet.inferTools({ toolSetContext }), messages });
+```
+
+Use the `order` parameter of `createToolSet()` or the `.order()` method to change the tool order strategy:
+
+- `'stable'` (default), static tools first, conditionally-activated tools to the tail
+- `'insertion'`, as declared in the `tools` record (resolves to no `toolOrder`)
+- `Array<string>`, an explicit order; names not listed keep insertion order after the listed ones
+- a comparator `(a, b) => number` over `{ toolName, tool, dynamic, index }`
+
+Ordering follows **last-call wins**:
+
+```typescript
+const toolSet = createToolSet({ tools, order: 'insertion' }); // opt out — keep the declared order
+
+toolSet.order(['search', 'get_weather']); // pin a few, the rest follow insertion order
+toolSet.order((a, b) => a.toolName.localeCompare(b.toolName)); // comparator over { toolName, tool, dynamic, index }
+```
+
 ### Immutable vs Mutable
 
 By default, `createToolSet()` returns an **immutable** tool set, that means every method returns a new instance and the original is never modified. This is ideal when the tool set is created once in the global scope and shared across requests:
@@ -517,6 +567,7 @@ const result = await generateText({
 
 - `options.tools`, a plain `Record<string, Tool>` of AI SDK tools
 - `options.mutable` (optional), set to `true` for a mutable tool set (default: `false`)
+- `options.order` (optional), the ordering strategy resolved into `toolOrder` (default: `'stable'`), see [`.order(order)`](#orderorder)
 
 Returns a `ToolSet` instance. All tools are active by default.
 
@@ -627,34 +678,48 @@ toolSet.choice({ type: 'tool', toolName: 'search' });
 toolSet.choice(({ steps }) => (steps?.length === 0 ? { type: 'tool', toolName: 'search' } : 'auto'));
 ```
 
+#### `.order(order)`
+
+Set how tools are ordered for the provider. `.inferTools()` resolves this into a `toolOrder` value (the AI SDK's own [`toolOrder`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text) parameter), so it applies without reordering the `tools` record and flows through `prepareStep`. Returns a new instance (immutable) or `this` (mutable). Last-call wins. `order` is one of:
+
+- `'stable'` (default), static tools first (in insertion order), conditionally-activated tools to the tail — keeps the prompt's static tool prefix stable for provider prompt caching
+- `'insertion'`, as declared in the `tools` record (resolves to no `toolOrder`)
+- `Array<string>`, an explicit order; names not listed keep insertion order after the listed ones
+- a comparator `(a, b) => number` over `{ toolName, tool, dynamic, index }`, matching `Array.prototype.sort`
+
+```ts
+toolSet.order('stable');
+toolSet.order(['search', 'get_weather']);
+toolSet.order((a, b) => a.toolName.localeCompare(b.toolName));
+```
+
 #### `.inferTools(input?)`
 
-Evaluate all predicates, approval resolvers, and the tool-choice entry and return `{ tools, activeTools, toolApproval, toolChoice }`, directly spreadable into `generateText()` or `streamText()`. The input is optional; all fields are optional. Predicates and resolvers receive `undefined` for fields not provided.
+Evaluate all predicates, approval resolvers, the tool-choice entry, and the order strategy and return `{ tools, activeTools, toolApproval, toolChoice, toolOrder }`, directly spreadable into `generateText()`, `streamText()`, or a `prepareStep` return. The input is optional; all fields are optional. Predicates and resolvers receive `undefined` for fields not provided.
 
 - `input` (optional):
   - `messages` (optional), the current conversation messages
   - `steps` (optional), the completed steps of the current run (the `StepResult` array from `prepareStep`)
   - `toolSetContext` (optional), arbitrary values passed to predicates, approval resolvers, and the tool-choice resolver
 
-The result also includes `toolChoice` when set via `.choice()` (otherwise `undefined`).
+The result includes `toolChoice` when set via `.choice()` (otherwise `undefined`), and `toolOrder` when `.order()` is anything other than `'insertion'` (otherwise `undefined`).
 
 ```ts
-// Static-only (no predicates)
-const { tools, activeTools, toolApproval, toolChoice } = toolSet.inferTools();
+// Spread the whole result into generateText / streamText
+const result = await generateText({ model, ...toolSet.inferTools({ messages, toolSetContext }), messages });
 
-// With messages
-const { tools, activeTools, toolApproval, toolChoice } = toolSet.inferTools({ messages });
+// Or destructure the parts you need
+const { tools, activeTools, toolApproval, toolChoice, toolOrder } = toolSet.inferTools({ messages });
 
-// With toolSetContext
-const { tools, activeTools, toolApproval, toolChoice } = toolSet.inferTools({ toolSetContext: { isAdmin: true } });
-
-// With steps (e.g. inside prepareStep)
-const { tools, activeTools, toolApproval, toolChoice } = toolSet.inferTools({ steps });
-
-// With both
-const { tools, activeTools, toolApproval, toolChoice } = toolSet.inferTools({ messages, toolSetContext });
-
-const result = await generateText({ model, tools, activeTools, toolApproval, toolChoice, messages });
+// Inside prepareStep — activeTools + toolOrder recomputed per step
+const result = await generateText({
+  model,
+  tools,
+  prepareStep: ({ steps }) => {
+    const { activeTools, toolOrder } = toolSet.inferTools({ steps });
+    return { activeTools, toolOrder };
+  },
+});
 ```
 
 #### `.clone(options?)`

@@ -689,6 +689,147 @@ describe('immutable toolset', () => {
     });
   });
 
+  describe('order', () => {
+    /** The effective order the provider sees: toolOrder filtered to the active tools. */
+    const providerOrder = (result: { activeTools: Array<string>; toolOrder?: Array<string> }) =>
+      (result.toolOrder ?? []).filter((name) => result.activeTools.includes(name));
+
+    test('should default to stable, pushing dynamic tools to the tail', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).activateWhen('cancel', () => true);
+
+      // Act
+      const result = toolSet.inferTools();
+
+      // Assert — default is 'stable'; the tools record itself is untouched
+      expect(result.toolOrder).toEqual(['plain', 'calc', 'edit', 'archive', 'cancel']);
+      expect(Object.keys(result.tools)).toEqual(['plain', 'calc', 'cancel', 'edit', 'archive']);
+    });
+
+    test('should keep the insertion order under the default when no tools are dynamic', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS });
+
+      // Act
+      const result = toolSet.inferTools();
+
+      // Assert — all tools static, so stable resolves to the declared order
+      expect(result.toolOrder).toEqual(['plain', 'calc', 'cancel', 'edit', 'archive']);
+    });
+
+    test('should push dynamic tools to the tail with an explicit "stable"', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS })
+        .activateWhen('cancel', () => true)
+        .order('stable');
+
+      // Act
+      const result = toolSet.inferTools();
+
+      // Assert
+      expect(result.toolOrder).toEqual(['plain', 'calc', 'edit', 'archive', 'cancel']);
+    });
+
+    test('should resolve no toolOrder for "insertion"', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS })
+        .activateWhen('cancel', () => true)
+        .order('insertion');
+
+      // Act
+      const result = toolSet.inferTools();
+
+      // Assert
+      expect(result.toolOrder).toBeUndefined();
+    });
+
+    test('should order by an explicit name list, keeping the rest in insertion order', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).order(['edit', 'plain']);
+
+      // Act
+      const result = toolSet.inferTools();
+
+      // Assert
+      expect(result.toolOrder).toEqual(['edit', 'plain', 'calc', 'cancel', 'archive']);
+    });
+
+    test('should order by a custom comparator', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).order((a, b) => b.toolName.length - a.toolName.length);
+
+      // Act
+      const result = toolSet.inferTools();
+
+      // Assert
+      expect(result.toolOrder).toEqual(['archive', 'cancel', 'plain', 'calc', 'edit']);
+    });
+
+    test('should keep activeTools in insertion order and carry the order in toolOrder', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).deactivate(['cancel']).order(['archive', 'edit']);
+
+      // Act
+      const result = toolSet.inferTools();
+
+      // Assert
+      expect(result.activeTools).toEqual(['plain', 'calc', 'edit', 'archive']);
+      expect(result.toolOrder).toEqual(['archive', 'edit', 'plain', 'calc', 'cancel']);
+    });
+
+    test('should keep the static provider prefix stable when a dynamic tool toggles', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS })
+        .activateWhen('cancel', ({ messages }) =>
+          messages?.some((m) => m.parts.some((p) => p.type === 'text' && p.text.includes('cancel'))),
+        )
+        .order('stable');
+
+      // Act
+      const withoutTrigger = toolSet.inferTools({ messages: [UIMessages.user('hello')] });
+      const withTrigger = toolSet.inferTools({ messages: [UIMessages.user('cancel my order')] });
+
+      // Assert — toolOrder is identical, so the active provider prefix never shifts
+      expect(withoutTrigger.toolOrder).toEqual(withTrigger.toolOrder);
+      expect(providerOrder(withoutTrigger)).toEqual(['plain', 'calc', 'edit', 'archive']);
+      expect(providerOrder(withTrigger)).toEqual(['plain', 'calc', 'edit', 'archive', 'cancel']);
+      expect(providerOrder(withTrigger).slice(0, 4)).toEqual(providerOrder(withoutTrigger));
+    });
+
+    test('should follow last-call wins', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).order('insertion').order(['edit', 'plain']);
+
+      // Act
+      const result = toolSet.inferTools();
+
+      // Assert
+      expect(result.toolOrder).toEqual(['edit', 'plain', 'calc', 'cancel', 'archive']);
+    });
+
+    test('should not mutate the original toolset', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).order(['edit', 'plain']);
+
+      // Act
+      toolSet.order('insertion');
+
+      // Assert
+      expect(toolSet.inferTools().toolOrder).toEqual(['edit', 'plain', 'calc', 'cancel', 'archive']);
+    });
+
+    test('should accept order from the factory options', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS, order: ['edit', 'plain'] });
+
+      // Act
+      const result = toolSet.inferTools();
+
+      // Assert
+      expect(result.toolOrder).toEqual(['edit', 'plain', 'calc', 'cancel', 'archive']);
+    });
+  });
+
   describe('chaining', () => {
     test('should support method chaining', () => {
       // Arrange & Act
@@ -1255,6 +1396,30 @@ describe('mutable toolset', () => {
 
       // Assert
       expect(toolSet.inferTools().toolChoice).toBe('none');
+    });
+  });
+
+  describe('order', () => {
+    test('should mutate in-place and return this', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true });
+
+      // Act
+      const result = toolSet.order('stable');
+
+      // Assert
+      expect(result).toBe(toolSet);
+    });
+
+    test('should resolve order and follow last-call wins', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true });
+
+      // Act
+      toolSet.order('insertion').order(['edit', 'plain']);
+
+      // Assert
+      expect(toolSet.inferTools().toolOrder).toEqual(['edit', 'plain', 'calc', 'cancel', 'archive']);
     });
   });
 
