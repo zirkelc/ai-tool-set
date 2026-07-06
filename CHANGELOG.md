@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.1](https://github.com/zirkelc/ai-tool-set/compare/v2.3.0...v2.3.1) (2026-07-06)
+
+
+### Documentation
+
+* link AI SDK references in README ([8f66822](https://github.com/zirkelc/ai-tool-set/commit/8f668220c2a504442035c0701e10464b7b113261))
+
 ## [2.3.0](https://github.com/zirkelc/ai-tool-set/compare/v2.2.0...v2.3.0) (2026-07-06)
 
 
