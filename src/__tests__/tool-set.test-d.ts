@@ -463,6 +463,20 @@ describe('immutable toolset', () => {
     });
   });
 
+  describe('order', () => {
+    test('should preserve activation tracking through the chain', () => {
+      const toolSet = createToolSet({ tools: TOOLS }).deactivate(['plain', 'calc']).order('stable');
+      expectTypeOf<InferActiveTools<typeof toolSet>>().toEqualTypeOf<'cancel' | 'edit' | 'archive'>();
+    });
+
+    test('should constrain an explicit name list to tool names', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      toolSet.order(['plain', 'calc']);
+      // @ts-expect-error unknown tool name is rejected
+      toolSet.order(['nope']);
+    });
+  });
+
   describe('clone', () => {
     test('should return immutable toolset by default', () => {
       const toolSet = createToolSet({ tools: TOOLS });

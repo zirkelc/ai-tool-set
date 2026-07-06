@@ -265,6 +265,59 @@ const result = await generateText({
 });
 ```
 
+### Stable Tool Order
+
+The AI SDK sends tools to the provider in the **insertion order** of the `tools` record, filtered by `activeTools`. When you toggle tools with [conditional activation](#conditional-activation), a dynamic tool in the middle of the record shifts every tool after it as it flips on and off, which can invalidate the provider's prompt cache for the tool block.
+
+`ai-tool-set` resolves this into a stable order for you. **By default it uses `'stable'`**: always-active (static) tools stay in a fixed prefix and conditionally-activated (dynamic) tools sort to the tail, so the static prefix stays byte-identical as the dynamic tools toggle. AI SDK v6 has no `toolOrder` parameter, so `.inferTools()` re-creates the `tools` record in the resolved order (returning the original record reference unchanged when the order is a no-op). Spread the whole result so the reordered `tools` reaches the provider:
+
+```typescript
+// Stable tool ordering is default when omitted
+const toolSet = createToolSet({ tools, order: 'stable' })
+  // list_orders drops out once it has been called this run
+  .deactivateWhen('list_orders', ({ steps }) =>
+    steps?.some((s) => s.staticToolCalls.some((c) => c.toolName === 'list_orders')),
+  );
+
+const result = await generateText({ model, ...toolSet.inferTools(), prompt: 'List my orders' });
+```
+
+In a multi-step run, spread the reordered record once at the top level, then recompute `activeTools` per step inside `prepareStep()`. The order depends on the activation config, not on runtime input, so the reordered record is stable across steps and the static prefix never shifts:
+
+```typescript
+import { generateText, stepCountIs } from 'ai';
+
+// Re-created once: static tools first, dynamic tools to the tail
+const { tools } = toolSet.inferTools();
+
+const result = await generateText({
+  model,
+  tools,
+  stopWhen: stepCountIs(10),
+  prepareStep: ({ steps }) => {
+    // activeTools recomputed per step; the reordered record keeps the static prefix stable
+    const { activeTools } = toolSet.inferTools({ steps });
+    return { activeTools };
+  },
+});
+```
+
+Use the `order` parameter of `createToolSet()` or the `.order()` method to change the tool order strategy:
+
+- `'stable'` (default), static tools first, conditionally-activated tools to the tail
+- `'insertion'`, as declared in the `tools` record (no reordering — the original record reference is returned)
+- `Array<string>`, an explicit order; names not listed keep insertion order after the listed ones
+- a comparator `(a, b) => number` over `{ toolName, tool, dynamic, index }`
+
+Ordering follows **last-call wins**:
+
+```typescript
+const toolSet = createToolSet({ tools, order: 'insertion' }); // opt out — keep the declared order
+
+toolSet.order(['search', 'get_weather']); // pin a few, the rest follow insertion order
+toolSet.order((a, b) => a.toolName.localeCompare(b.toolName)); // comparator over { toolName, tool, dynamic, index }
+```
+
 ### Immutable vs Mutable
 
 By default, `createToolSet()` returns an **immutable** tool set, that means every method returns a new instance and the original is never modified. This is ideal when the tool set is created once in the global scope and shared across requests:
@@ -410,6 +463,7 @@ const { tools, activeTools } = toolSet.inferTools({
 
 - `options.tools`, a plain `Record<string, Tool>` of AI SDK tools
 - `options.mutable` (optional), set to `true` for a mutable tool set (default: `false`)
+- `options.order` (optional), the ordering strategy that reorders the resolved `tools` record (default: `'stable'`), see [`.order(order)`](#orderorder)
 
 Returns a `ToolSet` instance. All tools are active by default.
 
@@ -478,9 +532,24 @@ toolSet.choice({ type: 'tool', toolName: 'search' });
 toolSet.choice(({ steps }) => (steps?.length === 0 ? { type: 'tool', toolName: 'search' } : 'auto'));
 ```
 
+#### `.order(order)`
+
+Set how tools are ordered for the provider. AI SDK v6 has no `toolOrder` parameter, so `.inferTools()` re-creates the `tools` record in the resolved order (the provider renders tools in the record's own key order). When the order is unchanged, the original record reference is returned as-is. Returns a new instance (immutable) or `this` (mutable). Last-call wins. `order` is one of:
+
+- `'stable'` (default), static tools first (in insertion order), conditionally-activated tools to the tail — keeps the prompt's static tool prefix stable for provider prompt caching
+- `'insertion'`, as declared in the `tools` record (no reordering)
+- `Array<string>`, an explicit order; names not listed keep insertion order after the listed ones
+- a comparator `(a, b) => number` over `{ toolName, tool, dynamic, index }`, matching `Array.prototype.sort`
+
+```ts
+toolSet.order('stable');
+toolSet.order(['search', 'get_weather']);
+toolSet.order((a, b) => a.toolName.localeCompare(b.toolName));
+```
+
 #### `.inferTools(input?)`
 
-Evaluate all predicates and the tool-choice entry and return `{ tools, activeTools, toolChoice }`, directly spreadable into `generateText()` or `streamText()`. The input is optional; all fields are optional. Predicates and resolvers receive `undefined` for fields not provided.
+Evaluate all predicates and the tool-choice entry and return `{ tools, activeTools, toolChoice }`, directly spreadable into `generateText()` or `streamText()`. The `tools` record is re-created in the resolved order (see [`.order(order)`](#orderorder)). The input is optional; all fields are optional. Predicates and resolvers receive `undefined` for fields not provided.
 
 - `input` (optional):
   - `messages` (optional), the current conversation messages
