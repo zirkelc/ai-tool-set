@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/zirkelc/ai-tool-set/compare/v1.4.0...v1.5.0) (2026-07-06)
+
+
+### Features
+
+* add tool ordering with .order() ([5098531](https://github.com/zirkelc/ai-tool-set/commit/50985314e77966d5398c06f1ae6a9abd84e89f29))
+
 ## [1.4.0](https://github.com/zirkelc/ai-tool-set/compare/v1.3.0...v1.4.0) (2026-07-01)
 
 
