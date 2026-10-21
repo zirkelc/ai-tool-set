@@ -844,6 +844,58 @@ type All = InferAllTools<typeof toolSet>;
 // 'search' | 'list_orders' | 'cancel_order'
 ```
 
+### `InferToolSetContext`
+
+Extract the `TOOLSET_CONTEXT` type (the `toolSetContext` that `inferTools()` accepts) from an immutable or mutable `ToolSet` instance:
+
+```ts
+import type { InferToolSetContext } from 'ai-tool-set';
+
+const toolSet = createToolSet<typeof tools, MyUIMessage, { isAdmin: boolean }>({ tools });
+
+type Context = InferToolSetContext<typeof toolSet>;
+// { isAdmin: boolean }
+```
+
+### `ResolvedToolSet`
+
+The return type of `inferTools()`. Generic over `TOOLS` and `RUNTIME_CONTEXT`:
+
+```ts
+import type { ResolvedToolSet } from 'ai-tool-set';
+
+type Resolved = ResolvedToolSet<typeof tools>;
+// {
+//   tools: typeof tools;
+//   activeTools: Array<'search' | 'list_orders' | 'cancel_order'>;
+//   toolApproval: { search?: ...; list_orders?: ...; cancel_order?: ... };
+//   toolChoice?: ToolChoice<typeof tools>;
+//   toolOrder?: Array<'search' | 'list_orders' | 'cancel_order'>;
+// }
+```
+
+### `AnyToolSet`
+
+Constraint that accepts any immutable or mutable `ToolSet` instance. Use it for generic helpers that take a toolset of any shape, together with `InferToolSetContext` for its context and `InferToolSet` for its tools:
+
+```ts
+import type { AnyToolSet, InferToolSet, InferToolSetContext, ResolvedToolSet } from 'ai-tool-set';
+
+function run<TOOLSET extends AnyToolSet>(input: { toolSet: TOOLSET; toolSetContext?: InferToolSetContext<TOOLSET> }) {
+  const { tools, activeTools, toolChoice }: ResolvedToolSet<InferToolSet<TOOLSET>> = input.toolSet.inferTools({
+    toolSetContext: input.toolSetContext,
+  });
+  // ...
+}
+
+run({ toolSet, toolSetContext: { isAdmin: true } });
+// @ts-expect-error: the context does not match the toolset
+run({ toolSet, toolSetContext: { userId: '1' } });
+```
+
+> [!NOTE]
+> Inside the generic helper, TypeScript resolves `inferTools()` against the `any` type arguments of `AnyToolSet`, so its result is `ResolvedToolSet<any, any>`. Annotate the result as `ResolvedToolSet<InferToolSet<TOOLSET>>` to type it with the tools of the toolset. At the call site, `TOOLSET` is the concrete toolset, so a wrong `toolSetContext` is an error.
+
 ## License
 
 MIT

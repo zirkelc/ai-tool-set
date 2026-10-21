@@ -1,15 +1,18 @@
-import type { InferUITool, ModelMessage, PrepareStepResult, StepResult, UIMessage } from 'ai';
+import type { InferUITool, ModelMessage, PrepareStepResult, StepResult, ToolChoice, UIMessage } from 'ai';
 import { tool } from 'ai';
 import { describe, expectTypeOf, test } from 'vitest';
 import { z } from 'zod';
 import {
   createToolSet,
+  type AnyToolSet,
   type InferActiveTools,
   type InferAllTools,
   type InferInactiveTools,
   type InferToolSet,
+  type InferToolSetContext,
   type InferToolsInput,
   type InferUIToolSet,
+  type ResolvedToolSet,
   type ToolSet,
 } from '../tool-set.js';
 import { TOOLS, type MyUIMessage, plainTool, calcTool, cancelTool, editTool, archiveTool } from './fixtures.js';
@@ -261,6 +264,94 @@ describe('exported types', () => {
     test('should return all tools for mutable toolset', () => {
       const toolSet = createToolSet({ tools: TOOLS, mutable: true });
       expectTypeOf<InferAllTools<typeof toolSet>>().toEqualTypeOf<'plain' | 'calc' | 'cancel' | 'edit' | 'archive'>();
+    });
+  });
+
+  describe('InferToolSetContext', () => {
+    test('should infer TOOLSET_CONTEXT from an immutable toolset', () => {
+      type MyCtx = { isAdmin: boolean };
+      const toolSet = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS }).deactivate(['plain']);
+      expectTypeOf<InferToolSetContext<typeof toolSet>>().toEqualTypeOf<MyCtx>();
+    });
+
+    test('should infer TOOLSET_CONTEXT from a mutable toolset', () => {
+      type MyCtx = { isAdmin: boolean };
+      const toolSet = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS, mutable: true });
+      expectTypeOf<InferToolSetContext<typeof toolSet>>().toEqualTypeOf<MyCtx>();
+    });
+
+    test('should default to Record<string, unknown>', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      expectTypeOf<InferToolSetContext<typeof toolSet>>().toEqualTypeOf<Record<string, unknown>>();
+    });
+
+    test('should infer TOOLSET_CONTEXT from a ToolSet union', () => {
+      type MyCtx = { isAdmin: boolean };
+      const base = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS });
+      expectTypeOf<InferToolSetContext<ToolSet<typeof base>>>().toEqualTypeOf<MyCtx>();
+    });
+  });
+
+  describe('ResolvedToolSet', () => {
+    test('should match the inferTools() return type of an immutable toolset', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      expectTypeOf<ReturnType<typeof toolSet.inferTools>>().toEqualTypeOf<ResolvedToolSet<typeof TOOLS>>();
+    });
+
+    test('should match the inferTools() return type of a mutable toolset', () => {
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true });
+      expectTypeOf<ReturnType<typeof toolSet.inferTools>>().toEqualTypeOf<ResolvedToolSet<typeof TOOLS>>();
+    });
+
+    test('should carry RUNTIME_CONTEXT', () => {
+      type MyRuntime = { userId: string };
+      const toolSet = createToolSet<typeof TOOLS, UIMessage, Record<string, unknown>, MyRuntime>({ tools: TOOLS });
+      expectTypeOf<ReturnType<typeof toolSet.inferTools>>().toEqualTypeOf<ResolvedToolSet<typeof TOOLS, MyRuntime>>();
+    });
+  });
+
+  describe('AnyToolSet', () => {
+    type MyCtx = { isAdmin: boolean };
+
+    /**
+     * Through a generic TOOLSET, `inferTools()` resolves against the `any` arguments of the
+     * constraint, so the result is annotated with the toolset's own tools.
+     */
+    function run<TOOLSET extends AnyToolSet>(input: {
+      toolSet: TOOLSET;
+      toolSetContext?: InferToolSetContext<TOOLSET>;
+    }): ResolvedToolSet<InferToolSet<TOOLSET>> {
+      const result: ResolvedToolSet<InferToolSet<TOOLSET>> = input.toolSet.inferTools({
+        toolSetContext: input.toolSetContext,
+      });
+      const _tools: InferToolSet<TOOLSET> = result.tools;
+      return result;
+    }
+
+    test('should accept an immutable toolset with its context', () => {
+      const toolSet = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS }).deactivate(['plain']);
+      const result = run({ toolSet, toolSetContext: { isAdmin: true } });
+      expectTypeOf(result.tools).toEqualTypeOf<typeof TOOLS>();
+      expectTypeOf(result.toolChoice).toEqualTypeOf<ToolChoice<typeof TOOLS> | undefined>();
+    });
+
+    test('should accept a mutable toolset with its context', () => {
+      const toolSet = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS, mutable: true });
+      const result = run({ toolSet, toolSetContext: { isAdmin: true } });
+      expectTypeOf(result.activeTools).toEqualTypeOf<Array<keyof typeof TOOLS & string>>();
+    });
+
+    test('should accept a toolset without context', () => {
+      const toolSet = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS });
+      run({ toolSet });
+    });
+
+    test('should reject a context that does not match the toolset', () => {
+      const toolSet = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS });
+      // @ts-expect-error — isAdmin must be a boolean
+      run({ toolSet, toolSetContext: { isAdmin: 'yes' } });
+      // @ts-expect-error — userId is not in MyCtx
+      run({ toolSet: toolSet.clone({ mutable: true }), toolSetContext: { userId: '1' } });
     });
   });
 });
