@@ -38,6 +38,14 @@ export type InferUIToolSet<TOOLSET extends ToolRecord | AnyToolSet> = {
   [K in keyof InferToolSet<TOOLSET> & string]: InferUITool<InferToolSet<TOOLSET>[K]>;
 };
 
+/** Infer the `TOOLSET_CONTEXT` type parameter (the `toolSetContext` of `inferTools()`) from a ToolSet instance. */
+export type InferToolSetContext<TOOLSET extends AnyToolSet> =
+  TOOLSET extends ImmutableToolSet<any, any, infer TOOLSET_CONTEXT, any, any, any>
+    ? TOOLSET_CONTEXT
+    : TOOLSET extends MutableToolSet<any, any, infer TOOLSET_CONTEXT, any>
+      ? TOOLSET_CONTEXT
+      : never;
+
 /**
  * Extract tool names tracked as active from an ImmutableToolSet instance.
  * Returns `never` for MutableToolSet (cannot be determined at compile time).
@@ -226,7 +234,7 @@ type ResolvedToolApproval<
 };
 
 /** Resolved tools, active tool names, approval record, choice, and order returned by `inferTools()`. */
-type ResolvedToolSet<
+export type ResolvedToolSet<
   TOOLS extends ToolRecord,
   RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
 > = {
@@ -242,7 +250,7 @@ type ResolvedToolSet<
 };
 
 /** Union of both toolset classes for type utility constraints. */
-type AnyToolSet = ImmutableToolSet<any, any, any, any, any, any> | MutableToolSet<any, any, any, any>;
+export type AnyToolSet = ImmutableToolSet<any, any, any, any, any, any> | MutableToolSet<any, any, any, any>;
 
 /**
  * Derive a parameter type that accepts both immutable and mutable variants of an existing tool set.
