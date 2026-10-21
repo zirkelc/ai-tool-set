@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.4.0](https://github.com/zirkelc/ai-tool-set/compare/v2.3.0...v2.4.0) (2026-10-21)
+
+
+### Features
+
+* export ResolvedToolSet, AnyToolSet and InferToolSetContext types ([#18](https://github.com/zirkelc/ai-tool-set/issues/18)) ([f05f345](https://github.com/zirkelc/ai-tool-set/commit/f05f345f8905dc5feff5afcaf9c3547d33e4c638))
+
+
+### Documentation
+
+* link AI SDK references in README ([8f66822](https://github.com/zirkelc/ai-tool-set/commit/8f668220c2a504442035c0701e10464b7b113261))
+
 ## [2.3.0](https://github.com/zirkelc/ai-tool-set/compare/v2.2.0...v2.3.0) (2026-07-06)
 
 
