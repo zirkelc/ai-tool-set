@@ -459,6 +459,34 @@ export async function POST(req: Request) {
 }
 ```
 
+### Presets
+
+Every method of an immutable toolset returns a new instance. Thus you can make one preset for each role or mode from a shared base, and select the preset at runtime by name:
+
+```typescript
+const baseToolSet = createToolSet({ tools }).approval('cancel_order', 'user-approval');
+
+const presets = {
+  guest: baseToolSet.deactivate(['list_orders', 'cancel_order']),
+  customer: baseToolSet,
+  admin: baseToolSet.approve('cancel_order'),
+};
+
+type Role = keyof typeof presets; // 'guest' | 'customer' | 'admin'
+
+export async function POST(req: Request) {
+  const { messages, role } = await req.json();
+
+  const result = await generateText({
+    model,
+    ...presets[role as Role].inferTools({ messages }),
+    messages,
+  });
+}
+```
+
+Each preset keeps its exact types, and it can use all methods: activation, approval, choice and order. A preset is fixed when you create it: a later change to `baseToolSet` makes a new instance and does not change the presets.
+
 ### Typed UI Tool Set
 
 Use `InferUIToolSet` to get fully typed UI messages from your tool set:
