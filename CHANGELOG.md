@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.5.1](https://github.com/zirkelc/ai-tool-set/compare/v2.5.0...v2.5.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* validate the tool name in choice() ([579fac3](https://github.com/zirkelc/ai-tool-set/commit/579fac3544a640664ce63b442743fc8fb97647d9))
+
+
+### Documentation
+
+* add Presets section to README ([0b4e6f2](https://github.com/zirkelc/ai-tool-set/commit/0b4e6f295b477dc3949e4b7128dae9bc32ab67f3))
+* add upgrade notes for 2.5.0 to CHANGELOG ([7075ba7](https://github.com/zirkelc/ai-tool-set/commit/7075ba7edec8d3a042a6b0e855cba8521782acfd))
+
 ## [2.5.0](https://github.com/zirkelc/ai-tool-set/compare/v2.4.0...v2.5.0) (2026-10-24)
 
 
