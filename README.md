@@ -591,19 +591,24 @@ const { tools } = toolSet;
 
 #### `.activate(names)`
 
-Statically activate tools by name. Returns a new instance (immutable) or `this` (mutable).
+Statically activate tools by name. Accepts one tool name or an array of tool names. Returns a new instance (immutable) or `this` (mutable).
 
 ```ts
-toolSet.activate(['cancel_order']);
+toolSet.activate('cancel_order');
+toolSet.activate(['cancel_order', 'list_orders']);
 ```
 
 #### `.deactivate(names)`
 
-Statically deactivate tools by name. Returns a new instance (immutable) or `this` (mutable).
+Statically deactivate tools by name. Accepts one tool name or an array of tool names. Returns a new instance (immutable) or `this` (mutable).
 
 ```ts
-toolSet.deactivate(['search']);
+toolSet.deactivate('search');
+toolSet.deactivate(['search', 'list_orders']);
 ```
+
+> [!NOTE]
+> All methods that take tool names throw an error for a name that is not in the `tools` record.
 
 #### `.activateWhen(name, predicate)` / `.activateWhen(predicates)`
 
@@ -628,17 +633,19 @@ toolSet.deactivateWhen('search', ({ messages }) => messages && messages.length >
 
 #### `.approve(names)`
 
-Statically approve tools by name (status `'approved'`). Returns a new instance (immutable) or `this` (mutable).
+Statically approve tools by name (status `'approved'`). Accepts one tool name or an array of tool names. Returns a new instance (immutable) or `this` (mutable).
 
 ```ts
+toolSet.approve('search');
 toolSet.approve(['list_orders']);
 ```
 
 #### `.deny(names)`
 
-Statically deny tools by name (status `'denied'`). Returns a new instance (immutable) or `this` (mutable).
+Statically deny tools by name (status `'denied'`). Accepts one tool name or an array of tool names. Returns a new instance (immutable) or `this` (mutable).
 
 ```ts
+toolSet.deny('search');
 toolSet.deny(['cancel_order']);
 ```
 
@@ -801,7 +808,7 @@ type MyUIMessage = UIMessage<unknown, any, InferUIToolSet<typeof toolSet>>;
 
 ### `InferActiveTools`
 
-Extract the tool names tracked as active from an immutable `ToolSet` instance. Tracks tools from `.activate()` and `.deactivateWhen()`.
+Extract the tool names that are statically active on an immutable `ToolSet` instance: tools with no activation entry and tools from `.activate()`. Tools from `.activateWhen()` and `.deactivateWhen()` are not included, because a predicate decides their state. See [`InferConditionalTools`](#inferconditionaltools).
 
 > [!NOTE]
 > `InferActiveTools` returns `never` for mutable toolsets, since TypeScript cannot track type changes on the same reference across method calls.
@@ -817,7 +824,7 @@ type Active = InferActiveTools<typeof toolSet>;
 
 ### `InferInactiveTools`
 
-Extract the tool names tracked as inactive from an immutable `ToolSet` instance. Tracks tools from `.deactivate()` and `.activateWhen()`.
+Extract the tool names that are statically inactive on an immutable `ToolSet` instance: tools from `.deactivate()`. Tools from `.activateWhen()` and `.deactivateWhen()` are not included, because a predicate decides their state. See [`InferConditionalTools`](#inferconditionaltools).
 
 > [!NOTE]
 > `InferInactiveTools` returns `never` for mutable toolsets, since TypeScript cannot track type changes on the same reference across method calls.
@@ -829,6 +836,24 @@ const toolSet = createToolSet({ tools }).deactivate(['cancel_order']);
 
 type Inactive = InferInactiveTools<typeof toolSet>;
 // 'cancel_order'
+```
+
+### `InferConditionalTools`
+
+Extract the tool names whose state is known only at `inferTools()` time, because a predicate from `.activateWhen()` or `.deactivateWhen()` decides it. A later `.activate()` or `.deactivate()` moves the tool out of this set again. Each tool name is in exactly one of `InferActiveTools`, `InferInactiveTools` and `InferConditionalTools`.
+
+> [!NOTE]
+> `InferConditionalTools` returns all tool names for mutable toolsets, since TypeScript cannot know their state at compile time. An immutable clone of a mutable toolset (`.clone()`) also starts with all tool names in this set.
+
+```ts
+import type { InferConditionalTools } from 'ai-tool-set';
+
+const toolSet = createToolSet({ tools })
+  .deactivate('cancel_order')
+  .activateWhen('list_orders', ({ toolSetContext }) => toolSetContext?.isAuthenticated);
+
+type Conditional = InferConditionalTools<typeof toolSet>;
+// 'list_orders'
 ```
 
 ### `InferAllTools`

@@ -3,6 +3,7 @@ export {
   type AnyToolSet,
   type InferActiveTools,
   type InferAllTools,
+  type InferConditionalTools,
   type InferInactiveTools,
   type InferToolSet,
   type InferToolSetContext,

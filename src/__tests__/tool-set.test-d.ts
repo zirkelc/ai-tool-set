@@ -7,6 +7,7 @@ import {
   type AnyToolSet,
   type InferActiveTools,
   type InferAllTools,
+  type InferConditionalTools,
   type InferInactiveTools,
   type InferToolSet,
   type InferToolSetContext,
@@ -120,14 +121,14 @@ describe('exported types', () => {
       expectTypeOf<InferActiveTools<typeof toolSet>>().toEqualTypeOf<'cancel' | 'edit' | 'archive'>();
     });
 
-    test('should track activateWhen as inactive', () => {
+    test('should exclude activateWhen tools', () => {
       const toolSet = createToolSet({ tools: TOOLS }).activateWhen('cancel', () => true);
       expectTypeOf<InferActiveTools<typeof toolSet>>().toEqualTypeOf<'plain' | 'calc' | 'edit' | 'archive'>();
     });
 
-    test('should track deactivateWhen as active', () => {
+    test('should exclude deactivateWhen tools', () => {
       const toolSet = createToolSet({ tools: TOOLS }).deactivateWhen('plain', () => true);
-      expectTypeOf<InferActiveTools<typeof toolSet>>().toEqualTypeOf<keyof typeof TOOLS>();
+      expectTypeOf<InferActiveTools<typeof toolSet>>().toEqualTypeOf<'calc' | 'cancel' | 'edit' | 'archive'>();
     });
 
     test('should track chained operations', () => {
@@ -135,7 +136,12 @@ describe('exported types', () => {
         .deactivate(['cancel'])
         .activateWhen('edit', () => true)
         .deactivateWhen('plain', () => true);
-      expectTypeOf<InferActiveTools<typeof toolSet>>().toEqualTypeOf<'plain' | 'calc' | 'archive'>();
+      expectTypeOf<InferActiveTools<typeof toolSet>>().toEqualTypeOf<'calc' | 'archive'>();
+    });
+
+    test('should track a single tool name', () => {
+      const toolSet = createToolSet({ tools: TOOLS }).deactivate('plain');
+      expectTypeOf<InferActiveTools<typeof toolSet>>().toEqualTypeOf<'calc' | 'cancel' | 'edit' | 'archive'>();
     });
 
     test('should return never for mutable toolset', () => {
@@ -228,17 +234,55 @@ describe('exported types', () => {
       expectTypeOf<InferInactiveTools<typeof toolSet>>().toEqualTypeOf<'plain' | 'calc'>();
     });
 
-    test('should track activateWhen as inactive', () => {
+    test('should exclude activateWhen tools', () => {
       const toolSet = createToolSet({ tools: TOOLS }).activateWhen({
         cancel: () => true,
         edit: () => true,
       });
-      expectTypeOf<InferInactiveTools<typeof toolSet>>().toEqualTypeOf<'cancel' | 'edit'>();
+      expectTypeOf<InferInactiveTools<typeof toolSet>>().toEqualTypeOf<never>();
+    });
+
+    test('should remove a deactivated tool when it becomes conditional', () => {
+      const toolSet = createToolSet({ tools: TOOLS })
+        .deactivate(['plain', 'calc'])
+        .activateWhen('plain', () => true);
+      expectTypeOf<InferInactiveTools<typeof toolSet>>().toEqualTypeOf<'calc'>();
     });
 
     test('should return never for mutable toolset', () => {
       const toolSet = createToolSet({ tools: TOOLS, mutable: true });
       expectTypeOf<InferInactiveTools<typeof toolSet>>().toEqualTypeOf<never>();
+    });
+  });
+
+  describe('InferConditionalTools', () => {
+    test('should return never for fresh immutable toolset', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      expectTypeOf<InferConditionalTools<typeof toolSet>>().toEqualTypeOf<never>();
+    });
+
+    test('should include activateWhen and deactivateWhen tools', () => {
+      const toolSet = createToolSet({ tools: TOOLS })
+        .activateWhen('cancel', () => true)
+        .deactivateWhen({ plain: () => true, edit: () => true });
+      expectTypeOf<InferConditionalTools<typeof toolSet>>().toEqualTypeOf<'cancel' | 'plain' | 'edit'>();
+    });
+
+    test('should remove a tool after a static activate or deactivate', () => {
+      const toolSet = createToolSet({ tools: TOOLS })
+        .activateWhen({ cancel: () => true, edit: () => true, archive: () => true })
+        .activate('cancel')
+        .deactivate(['edit']);
+      expectTypeOf<InferConditionalTools<typeof toolSet>>().toEqualTypeOf<'archive'>();
+      expectTypeOf<InferActiveTools<typeof toolSet>>().toEqualTypeOf<'plain' | 'calc' | 'cancel'>();
+      expectTypeOf<InferInactiveTools<typeof toolSet>>().toEqualTypeOf<'edit'>();
+    });
+
+    test('should return all tools for mutable toolset', () => {
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true });
+      expectTypeOf<InferConditionalTools<typeof toolSet>>().toEqualTypeOf<
+        'plain' | 'calc' | 'cancel' | 'edit' | 'archive'
+      >();
     });
   });
 
@@ -383,12 +427,22 @@ describe('immutable toolset', () => {
       toolSet.deactivate(['plain', 'calc']);
     });
 
+    test('should accept a single tool name', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      toolSet.activate('plain');
+      toolSet.deactivate('plain');
+    });
+
     test('should reject unknown tool names', () => {
       const toolSet = createToolSet({ tools: TOOLS });
       // @ts-expect-error — 'unknown' is not in TOOLS
       toolSet.activate(['unknown']);
       // @ts-expect-error — 'unknown' is not in TOOLS
       toolSet.deactivate(['unknown']);
+      // @ts-expect-error — 'unknown' is not in TOOLS
+      toolSet.activate('unknown');
+      // @ts-expect-error — 'unknown' is not in TOOLS
+      toolSet.deactivate('unknown');
     });
 
     test('should support chaining', () => {
@@ -537,6 +591,16 @@ describe('immutable toolset', () => {
       const toolSet = createToolSet({ tools: TOOLS });
       toolSet.approve(['cancel', 'edit']);
       toolSet.deny(['cancel']);
+    });
+
+    test('should accept a single tool name for approve and deny', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      toolSet.approve('cancel');
+      toolSet.deny('cancel');
+      // @ts-expect-error — 'unknown' is not in TOOLS
+      toolSet.approve('unknown');
+      // @ts-expect-error — 'unknown' is not in TOOLS
+      toolSet.deny('unknown');
     });
 
     test('should reject unknown tool names for approve and deny', () => {
@@ -733,6 +797,16 @@ describe('mutable toolset', () => {
       toolSet.deactivate(['unknown']);
     });
 
+    test('should accept a single tool name', () => {
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true });
+      toolSet.activate('plain');
+      toolSet.deactivate('plain');
+      toolSet.approve('cancel');
+      toolSet.deny('cancel');
+      // @ts-expect-error — 'unknown' is not in TOOLS
+      toolSet.activate('unknown');
+    });
+
     test('should return this', () => {
       const toolSet = createToolSet({ tools: TOOLS, mutable: true });
       const activated = toolSet.activate(['plain']);
@@ -830,7 +904,20 @@ describe('mutable toolset', () => {
       expectTypeOf(cloned.tools).toEqualTypeOf<typeof TOOLS>();
       // Immutable: deactivate returns new instance with updated types
       const deactivated = cloned.deactivate(['plain']);
-      expectTypeOf<InferActiveTools<typeof deactivated>>().toEqualTypeOf<'calc' | 'cancel' | 'edit' | 'archive'>();
+      expectTypeOf<InferInactiveTools<typeof deactivated>>().toEqualTypeOf<'plain'>();
+      expectTypeOf<InferConditionalTools<typeof deactivated>>().toEqualTypeOf<'calc' | 'cancel' | 'edit' | 'archive'>();
+    });
+
+    test('should track all tools as conditional on an immutable clone', () => {
+      // The mutable source can have any state, so no tool is statically active or inactive
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true });
+      toolSet.deactivate(['plain']);
+      const cloned = toolSet.clone();
+      expectTypeOf<InferActiveTools<typeof cloned>>().toEqualTypeOf<never>();
+      expectTypeOf<InferInactiveTools<typeof cloned>>().toEqualTypeOf<never>();
+      expectTypeOf<InferConditionalTools<typeof cloned>>().toEqualTypeOf<
+        'plain' | 'calc' | 'cancel' | 'edit' | 'archive'
+      >();
     });
 
     test('should return mutable toolset with mutable: true', () => {

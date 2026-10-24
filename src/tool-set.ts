@@ -27,7 +27,7 @@ type InferUIMessage<TOOLS extends ToolRecord> = UIMessage<unknown, any, InferUIT
 
 /** Infer the raw tool record from a ToolRecord or ToolSet instance. */
 export type InferToolSet<TOOLSET extends ToolRecord | AnyToolSet> =
-  TOOLSET extends ImmutableToolSet<infer TOOLS, any, any, any, any, any>
+  TOOLSET extends ImmutableToolSet<infer TOOLS, any, any, any, any, any, any>
     ? TOOLS
     : TOOLSET extends MutableToolSet<infer TOOLS, any, any, any>
       ? TOOLS
@@ -40,25 +40,39 @@ export type InferUIToolSet<TOOLSET extends ToolRecord | AnyToolSet> = {
 
 /** Infer the `TOOLSET_CONTEXT` type parameter (the `toolSetContext` of `inferTools()`) from a ToolSet instance. */
 export type InferToolSetContext<TOOLSET extends AnyToolSet> =
-  TOOLSET extends ImmutableToolSet<any, any, infer TOOLSET_CONTEXT, any, any, any>
+  TOOLSET extends ImmutableToolSet<any, any, infer TOOLSET_CONTEXT, any, any, any, any>
     ? TOOLSET_CONTEXT
     : TOOLSET extends MutableToolSet<any, any, infer TOOLSET_CONTEXT, any>
       ? TOOLSET_CONTEXT
       : never;
 
 /**
- * Extract tool names tracked as active from an ImmutableToolSet instance.
+ * Extract tool names that are statically active on an ImmutableToolSet instance.
+ * Excludes conditional tools (`activateWhen`/`deactivateWhen`), see {@link InferConditionalTools}.
  * Returns `never` for MutableToolSet (cannot be determined at compile time).
  */
 export type InferActiveTools<TOOLSET extends AnyToolSet> =
-  TOOLSET extends ImmutableToolSet<any, any, any, any, infer A, any> ? A : never;
+  TOOLSET extends ImmutableToolSet<any, any, any, any, infer A, any, any> ? A : never;
 
 /**
- * Extract tool names tracked as inactive from an ImmutableToolSet instance.
+ * Extract tool names that are statically inactive on an ImmutableToolSet instance.
+ * Excludes conditional tools (`activateWhen`/`deactivateWhen`), see {@link InferConditionalTools}.
  * Returns `never` for MutableToolSet (cannot be determined at compile time).
  */
 export type InferInactiveTools<TOOLSET extends AnyToolSet> =
-  TOOLSET extends ImmutableToolSet<any, any, any, any, any, infer D> ? D : never;
+  TOOLSET extends ImmutableToolSet<any, any, any, any, any, infer D, any> ? D : never;
+
+/**
+ * Extract tool names whose state is known only at `inferTools()` time, because a predicate
+ * (`activateWhen`/`deactivateWhen`) decides it.
+ * Returns all tool names for MutableToolSet, since its state cannot be determined at compile time.
+ */
+export type InferConditionalTools<TOOLSET extends AnyToolSet> =
+  TOOLSET extends ImmutableToolSet<any, any, any, any, any, any, infer C>
+    ? C
+    : TOOLSET extends MutableToolSet<infer TOOLS, any, any, any>
+      ? keyof TOOLS & string
+      : never;
 
 /**
  * Extract all tool names from a ToolSet instance — both active and inactive.
@@ -250,7 +264,7 @@ export type ResolvedToolSet<
 };
 
 /** Union of both toolset classes for type utility constraints. */
-export type AnyToolSet = ImmutableToolSet<any, any, any, any, any, any> | MutableToolSet<any, any, any, any>;
+export type AnyToolSet = ImmutableToolSet<any, any, any, any, any, any, any> | MutableToolSet<any, any, any, any>;
 
 /**
  * Derive a parameter type that accepts both immutable and mutable variants of an existing tool set.
@@ -282,27 +296,44 @@ export type ToolSet<TOOLSET extends AnyToolSet> =
     infer TOOLSET_CONTEXT,
     infer RUNTIME_CONTEXT,
     infer ACTIVATED,
-    infer DEACTIVATED
+    infer DEACTIVATED,
+    infer CONDITIONAL
   >
     ?
-        | ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED>
+        | ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED, CONDITIONAL>
         | MutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>
     : TOOLSET extends MutableToolSet<infer TOOLS, infer MESSAGE, infer TOOLSET_CONTEXT, infer RUNTIME_CONTEXT>
       ?
-          | ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, any, any>
+          | ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, any, any, any>
           | MutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>
       : never;
+
+/** Normalize a single tool name or a list of tool names to a list. */
+const toNames = (names: string | Array<string>): Array<string> => (typeof names === 'string' ? [names] : names);
+
+/** Throw if a name is not a key of the tool record, so that a typo does not silently do nothing. */
+const assertKnownTools = (tools: ToolRecord, names: Array<string>): void => {
+  for (const name of names) {
+    if (!Object.hasOwn(tools, name)) {
+      throw new Error(`Unknown tool: "${name}"`);
+    }
+  }
+};
 
 const toActivationEntries = (
   nameOrPredicates: string | Partial<Record<string, ActivationPredicate<any, any, any, any>>>,
   predicate?: ActivationPredicate<any, any, any, any>,
 ): Array<StoredActivationEntry> => {
-  if (typeof nameOrPredicates === 'string') {
-    return [{ toolName: nameOrPredicates, resolve: predicate!, dynamic: true }];
-  }
-  return Object.entries(nameOrPredicates)
-    .filter(([, pred]) => pred != null)
-    .map(([name, pred]) => ({ toolName: name, resolve: pred!, dynamic: true }));
+  const entries: Array<[string, unknown]> =
+    typeof nameOrPredicates === 'string'
+      ? [[nameOrPredicates, predicate]]
+      : Object.entries(nameOrPredicates).filter(([, pred]) => pred != null);
+  return entries.map(([name, pred]) => {
+    if (typeof pred !== 'function') {
+      throw new Error(`Predicate for tool "${name}" must be a function`);
+    }
+    return { toolName: name, resolve: pred as ActivationPredicate<any, any, any, any>, dynamic: true };
+  });
 };
 
 const toApprovalEntries = (
@@ -355,8 +386,24 @@ class ToolSetState<
     return this.#tools;
   }
 
-  activate(names: Array<string>): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
-    const newEntries = names.map((name) => ({ toolName: name, resolve: () => true, dynamic: false }));
+  /** Normalize to a list of names and throw on a name that is not in the tool record. */
+  #knownNames(names: string | Array<string>): Array<string> {
+    const list = toNames(names);
+    assertKnownTools(this.#tools, list);
+    return list;
+  }
+
+  /** Throw on an entry whose tool name is not in the tool record. */
+  #knownEntries<ENTRY extends { toolName: string }>(entries: Array<ENTRY>): Array<ENTRY> {
+    assertKnownTools(
+      this.#tools,
+      entries.map((e) => e.toolName),
+    );
+    return entries;
+  }
+
+  activate(names: string | Array<string>): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
+    const newEntries = this.#knownNames(names).map((name) => ({ toolName: name, resolve: () => true, dynamic: false }));
     return new ToolSetState(
       this.#tools,
       [...this.#activationEntries, ...newEntries],
@@ -366,8 +413,12 @@ class ToolSetState<
     );
   }
 
-  deactivate(names: Array<string>): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
-    const newEntries = names.map((name) => ({ toolName: name, resolve: () => false, dynamic: false }));
+  deactivate(names: string | Array<string>): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
+    const newEntries = this.#knownNames(names).map((name) => ({
+      toolName: name,
+      resolve: () => false,
+      dynamic: false,
+    }));
     return new ToolSetState(
       this.#tools,
       [...this.#activationEntries, ...newEntries],
@@ -385,7 +436,7 @@ class ToolSetState<
   ): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
     return new ToolSetState(
       this.#tools,
-      [...this.#activationEntries, ...toActivationEntries(nameOrPredicates, predicate)],
+      [...this.#activationEntries, ...this.#knownEntries(toActivationEntries(nameOrPredicates, predicate))],
       this.#approvalEntries,
       this.#toolChoiceEntries,
       this.#order,
@@ -398,7 +449,7 @@ class ToolSetState<
       | Partial<Record<string, ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>>>,
     predicate?: ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
   ): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
-    const newEntries = toActivationEntries(nameOrPredicates, predicate).map((e) => ({
+    const newEntries = this.#knownEntries(toActivationEntries(nameOrPredicates, predicate)).map((e) => ({
       ...e,
       resolve: (input: InferToolsInput<any, any, any, any>) => !e.resolve(input),
     }));
@@ -411,8 +462,11 @@ class ToolSetState<
     );
   }
 
-  approve(names: Array<string>): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
-    const newEntries = names.map((name) => ({ toolName: name, value: 'approved' as ToolApprovalStatus }));
+  approve(names: string | Array<string>): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
+    const newEntries = this.#knownNames(names).map((name) => ({
+      toolName: name,
+      value: 'approved' as ToolApprovalStatus,
+    }));
     return new ToolSetState(
       this.#tools,
       this.#activationEntries,
@@ -422,8 +476,11 @@ class ToolSetState<
     );
   }
 
-  deny(names: Array<string>): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
-    const newEntries = names.map((name) => ({ toolName: name, value: 'denied' as ToolApprovalStatus }));
+  deny(names: string | Array<string>): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
+    const newEntries = this.#knownNames(names).map((name) => ({
+      toolName: name,
+      value: 'denied' as ToolApprovalStatus,
+    }));
     return new ToolSetState(
       this.#tools,
       this.#activationEntries,
@@ -440,7 +497,7 @@ class ToolSetState<
     return new ToolSetState(
       this.#tools,
       this.#activationEntries,
-      [...this.#approvalEntries, ...toApprovalEntries(nameOrEntries, entry)],
+      [...this.#approvalEntries, ...this.#knownEntries(toApprovalEntries(nameOrEntries, entry))],
       this.#toolChoiceEntries,
       this.#order,
     );
@@ -459,6 +516,7 @@ class ToolSetState<
 
   /** Set the ordering strategy resolved into `toolOrder`. Last-call wins. */
   order(order: ToolOrderStrategy<TOOLS>): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
+    if (Array.isArray(order)) assertKnownTools(this.#tools, order);
     return new ToolSetState(
       this.#tools,
       this.#activationEntries,
@@ -524,6 +582,9 @@ class ToolSetState<
  * Resolution follows "last-call wins": each method appends an entry,
  * and the last entry for each tool determines its state.
  * Default (no entry) is active, and no approval (not-applicable).
+ *
+ * The type tracks each tool name in exactly one of three sets: `ACTIVATED` (statically active),
+ * `DEACTIVATED` (statically inactive) or `CONDITIONAL` (a predicate decides at `inferTools()` time).
  */
 class ImmutableToolSet<
   TOOLS extends ToolRecord,
@@ -532,6 +593,7 @@ class ImmutableToolSet<
   RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
   ACTIVATED extends string = never,
   DEACTIVATED extends string = never,
+  CONDITIONAL extends string = never,
 > {
   readonly #state: ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>;
 
@@ -545,83 +607,117 @@ class ImmutableToolSet<
 
   /** Statically activate tools by name. */
   activate<NAMES extends keyof TOOLS & string>(
-    names: Array<NAMES>,
+    names: NAMES | Array<NAMES>,
   ): ImmutableToolSet<
     TOOLS,
     MESSAGE,
     TOOLSET_CONTEXT,
     RUNTIME_CONTEXT,
     ACTIVATED | NAMES,
-    Exclude<DEACTIVATED, NAMES>
+    Exclude<DEACTIVATED, NAMES>,
+    Exclude<CONDITIONAL, NAMES>
   > {
     return new ImmutableToolSet(this.#state.activate(names));
   }
 
   /** Statically deactivate tools by name. */
   deactivate<NAMES extends keyof TOOLS & string>(
-    names: Array<NAMES>,
+    names: NAMES | Array<NAMES>,
   ): ImmutableToolSet<
     TOOLS,
     MESSAGE,
     TOOLSET_CONTEXT,
     RUNTIME_CONTEXT,
     Exclude<ACTIVATED, NAMES>,
-    DEACTIVATED | NAMES
+    DEACTIVATED | NAMES,
+    Exclude<CONDITIONAL, NAMES>
   > {
     return new ImmutableToolSet(this.#state.deactivate(names));
   }
 
   /**
    * Conditionally activate a tool — inactive by default, becomes active when predicate returns true.
-   * Tracks names in DEACTIVATED since the tool starts inactive.
+   * Tracks names in CONDITIONAL since the predicate decides the state at `inferTools()` time.
    */
   activateWhen<NAME extends keyof TOOLS & string>(
     name: NAME,
     predicate: ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
-  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, Exclude<ACTIVATED, NAME>, DEACTIVATED | NAME>;
-  activateWhen<NAMES extends keyof TOOLS & string>(
-    predicates: Partial<Record<NAMES, ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>>>,
-  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, Exclude<ACTIVATED, NAMES>, DEACTIVATED | NAMES>;
+  ): ImmutableToolSet<
+    TOOLS,
+    MESSAGE,
+    TOOLSET_CONTEXT,
+    RUNTIME_CONTEXT,
+    Exclude<ACTIVATED, NAME>,
+    Exclude<DEACTIVATED, NAME>,
+    CONDITIONAL | NAME
+  >;
+  activateWhen<NAME extends keyof TOOLS & string>(
+    predicates: Partial<Record<NAME, ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>>>,
+  ): ImmutableToolSet<
+    TOOLS,
+    MESSAGE,
+    TOOLSET_CONTEXT,
+    RUNTIME_CONTEXT,
+    Exclude<ACTIVATED, NAME>,
+    Exclude<DEACTIVATED, NAME>,
+    CONDITIONAL | NAME
+  >;
   activateWhen(
     nameOrPredicates:
       | string
       | Partial<Record<string, ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>>>,
     predicate?: ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
-  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED> {
+  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED, CONDITIONAL> {
     return new ImmutableToolSet(this.#state.activateWhen(nameOrPredicates, predicate));
   }
 
   /**
    * Conditionally deactivate a tool — active by default, becomes inactive when predicate returns true.
-   * Tracks names in ACTIVATED since the tool starts active.
+   * Tracks names in CONDITIONAL since the predicate decides the state at `inferTools()` time.
    */
   deactivateWhen<NAME extends keyof TOOLS & string>(
     name: NAME,
     predicate: ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
-  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED | NAME, Exclude<DEACTIVATED, NAME>>;
-  deactivateWhen<NAMES extends keyof TOOLS & string>(
-    predicates: Partial<Record<NAMES, ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>>>,
-  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED | NAMES, Exclude<DEACTIVATED, NAMES>>;
+  ): ImmutableToolSet<
+    TOOLS,
+    MESSAGE,
+    TOOLSET_CONTEXT,
+    RUNTIME_CONTEXT,
+    Exclude<ACTIVATED, NAME>,
+    Exclude<DEACTIVATED, NAME>,
+    CONDITIONAL | NAME
+  >;
+  deactivateWhen<NAME extends keyof TOOLS & string>(
+    predicates: Partial<Record<NAME, ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>>>,
+  ): ImmutableToolSet<
+    TOOLS,
+    MESSAGE,
+    TOOLSET_CONTEXT,
+    RUNTIME_CONTEXT,
+    Exclude<ACTIVATED, NAME>,
+    Exclude<DEACTIVATED, NAME>,
+    CONDITIONAL | NAME
+  >;
   deactivateWhen(
     nameOrPredicates:
       | string
       | Partial<Record<string, ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>>>,
     predicate?: ActivationPredicate<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
-  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED> {
+  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED, CONDITIONAL> {
     return new ImmutableToolSet(this.#state.deactivateWhen(nameOrPredicates, predicate));
   }
 
   /** Statically auto-approve tools by name (status `'approved'`). */
   approve<NAMES extends keyof TOOLS & string>(
-    names: Array<NAMES>,
-  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED> {
+    names: NAMES | Array<NAMES>,
+  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED, CONDITIONAL> {
     return new ImmutableToolSet(this.#state.approve(names));
   }
 
   /** Statically deny tools by name (status `'denied'`). */
   deny<NAMES extends keyof TOOLS & string>(
-    names: Array<NAMES>,
-  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED> {
+    names: NAMES | Array<NAMES>,
+  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED, CONDITIONAL> {
     return new ImmutableToolSet(this.#state.deny(names));
   }
 
@@ -633,14 +729,14 @@ class ImmutableToolSet<
   approval<NAME extends keyof TOOLS & string>(
     name: NAME,
     entry: ApprovalEntry<TOOLS[NAME], TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
-  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED>;
+  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED, CONDITIONAL>;
   approval(entries: {
     [K in keyof TOOLS & string]?: ApprovalEntry<TOOLS[K], TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>;
-  }): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED>;
+  }): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED, CONDITIONAL>;
   approval(
     nameOrEntries: string | Partial<Record<string, AnyApprovalEntry>>,
     entry?: AnyApprovalEntry,
-  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED> {
+  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED, CONDITIONAL> {
     return new ImmutableToolSet(this.#state.approval(nameOrEntries, entry));
   }
 
@@ -651,7 +747,7 @@ class ImmutableToolSet<
    */
   choice(
     entry: ToolChoiceEntry<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
-  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED> {
+  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED, CONDITIONAL> {
     return new ImmutableToolSet(this.#state.choice(entry));
   }
 
@@ -662,7 +758,7 @@ class ImmutableToolSet<
    */
   order(
     order: ToolOrderStrategy<TOOLS>,
-  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED> {
+  ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED, CONDITIONAL> {
     return new ImmutableToolSet(this.#state.order(order));
   }
 
@@ -677,7 +773,7 @@ class ImmutableToolSet<
   clone(options: { mutable: true }): MutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>;
   clone(options?: {
     mutable?: false;
-  }): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED>;
+  }): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, ACTIVATED, DEACTIVATED, CONDITIONAL>;
   clone(options?: {
     mutable?: boolean;
   }):
@@ -710,13 +806,13 @@ class MutableToolSet<
   }
 
   /** Statically activate tools by name. */
-  activate(names: Array<keyof TOOLS & string>): this {
+  activate(names: (keyof TOOLS & string) | Array<keyof TOOLS & string>): this {
     this.#state = this.#state.activate(names);
     return this;
   }
 
   /** Statically deactivate tools by name. */
-  deactivate(names: Array<keyof TOOLS & string>): this {
+  deactivate(names: (keyof TOOLS & string) | Array<keyof TOOLS & string>): this {
     this.#state = this.#state.deactivate(names);
     return this;
   }
@@ -766,13 +862,13 @@ class MutableToolSet<
   }
 
   /** Statically auto-approve tools by name (status `'approved'`). */
-  approve(names: Array<keyof TOOLS & string>): this {
+  approve(names: (keyof TOOLS & string) | Array<keyof TOOLS & string>): this {
     this.#state = this.#state.approve(names);
     return this;
   }
 
   /** Statically deny tools by name (status `'denied'`). */
-  deny(names: Array<keyof TOOLS & string>): this {
+  deny(names: (keyof TOOLS & string) | Array<keyof TOOLS & string>): this {
     this.#state = this.#state.deny(names);
     return this;
   }
@@ -819,11 +915,14 @@ class MutableToolSet<
     return this.#state.inferTools(input);
   }
 
-  /** Clone this toolset, optionally switching between immutable and mutable. */
+  /**
+   * Clone this toolset, optionally switching between immutable and mutable.
+   * An immutable clone tracks all tools as conditional, since the state of this toolset is not known at compile time.
+   */
   clone(options: { mutable: true }): MutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>;
   clone(options?: {
     mutable?: false;
-  }): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, keyof TOOLS & string>;
+  }): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, never, never, keyof TOOLS & string>;
   clone(options?: {
     mutable?: boolean;
   }):
@@ -865,6 +964,7 @@ export function createToolSet<
   options: CreateToolSetOptions<TOOLS> & { mutable?: false },
 ): ImmutableToolSet<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT, keyof TOOLS & string>;
 export function createToolSet(options: CreateToolSetOptions<ToolRecord>): AnyToolSet {
+  if (Array.isArray(options.order)) assertKnownTools(options.tools, options.order);
   const state = new ToolSetState(options.tools, [], [], [], options.order ?? 'stable');
   return options.mutable ? new MutableToolSet(state) : new ImmutableToolSet(state);
 }

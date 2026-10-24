@@ -6,9 +6,10 @@
  * `.activateWhen()`/`.deactivateWhen()` calls you chain. The `Infer*` helpers
  * read that back out as string-literal unions:
  *
- * - `InferActiveTools`   — tools from `.activate()` and `.deactivateWhen()`
- * - `InferInactiveTools` — tools from `.deactivate()` and `.activateWhen()`
- * - `InferAllTools`      — every tool name, regardless of state
+ * - `InferActiveTools`      — statically active tools (default and `.activate()`)
+ * - `InferInactiveTools`    — statically inactive tools (`.deactivate()`)
+ * - `InferConditionalTools` — tools from `.activateWhen()` and `.deactivateWhen()`
+ * - `InferAllTools`         — every tool name, regardless of state
  *
  * At runtime the same predicates resolve against `toolSetContext`, and only the
  * active tools are passed to the model — shown here with ai-test-kit so it runs
@@ -19,7 +20,13 @@
 import { generateText, tool, type UIMessage } from 'ai';
 import { Language, MockLanguageModel } from 'ai-test-kit/language';
 import { z } from 'zod';
-import { createToolSet, type InferActiveTools, type InferAllTools, type InferInactiveTools } from '../src/tool-set.js';
+import {
+  createToolSet,
+  type InferActiveTools,
+  type InferAllTools,
+  type InferConditionalTools,
+  type InferInactiveTools,
+} from '../src/tool-set.js';
 
 const tools = {
   search: tool({
@@ -56,10 +63,13 @@ const toolSet = createToolSet<typeof tools, UIMessage, Context>({ tools })
 // The helpers surface the tracked state as plain string-literal unions:
 
 type ActiveTools = InferActiveTools<typeof toolSet>;
-//   ^? type ActiveTools = "search" | "list_orders"
+//   ^? type ActiveTools = "search"
 
 type InactiveTools = InferInactiveTools<typeof toolSet>;
-//   ^? type InactiveTools = "cancel_order" | "refund"
+//   ^? type InactiveTools = "cancel_order"
+
+type ConditionalTools = InferConditionalTools<typeof toolSet>;
+//   ^? type ConditionalTools = "list_orders" | "refund"
 
 type AllTools = InferAllTools<typeof toolSet>;
 //   ^? type AllTools = "search" | "list_orders" | "cancel_order" | "refund"

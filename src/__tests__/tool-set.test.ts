@@ -90,6 +90,17 @@ describe('immutable toolset', () => {
       expect(activeTools).toContain('plain');
     });
 
+    test('should accept a single tool name', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).deactivate(['plain']);
+
+      // Act
+      const { activeTools } = toolSet.activate('plain').inferTools();
+
+      // Assert
+      expect(activeTools).toContain('plain');
+    });
+
     test('should not mutate the original toolset', () => {
       // Arrange
       const toolSet = createToolSet({ tools: TOOLS }).deactivate(['plain']);
@@ -114,6 +125,17 @@ describe('immutable toolset', () => {
       expect(activeTools).not.toContain('plain');
       expect(activeTools).not.toContain('calc');
       expect(activeTools).toContain('cancel');
+    });
+
+    test('should accept a single tool name', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS });
+
+      // Act
+      const { activeTools } = toolSet.deactivate('plain').inferTools();
+
+      // Assert
+      expect(activeTools).toEqual(['calc', 'cancel', 'edit', 'archive']);
     });
 
     test('should not mutate the original toolset', () => {
@@ -527,6 +549,17 @@ describe('immutable toolset', () => {
       expect(toolApproval.cancel).toBe('denied');
     });
 
+    test('should accept a single tool name for approve and deny', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).approve('cancel').deny('edit');
+
+      // Act
+      const { toolApproval } = toolSet.inferTools();
+
+      // Assert
+      expect(toolApproval).toEqual({ cancel: 'approved', edit: 'denied' });
+    });
+
     test('should set a constant status via approval', () => {
       // Arrange
       const toolSet = createToolSet({ tools: TOOLS }).approval('cancel', 'user-approval');
@@ -899,6 +932,101 @@ describe('immutable toolset', () => {
     });
   });
 
+  describe('validation', () => {
+    test('should throw on an unknown tool name in activate', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS });
+
+      // Act & Assert
+      expect(() => toolSet.activate(['unknown' as any])).toThrow();
+    });
+
+    test('should throw on an unknown tool name in deactivate', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS });
+
+      // Act & Assert
+      expect(() => toolSet.deactivate('unknown' as any)).toThrow();
+    });
+
+    test('should throw on an unknown tool name in activateWhen', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS });
+
+      // Act & Assert
+      expect(() => toolSet.activateWhen('unknown' as any, () => true)).toThrow();
+      expect(() => toolSet.activateWhen({ unknown: () => true } as any)).toThrow();
+    });
+
+    test('should throw on an unknown tool name in deactivateWhen', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS });
+
+      // Act & Assert
+      expect(() => toolSet.deactivateWhen('unknown' as any, () => true)).toThrow();
+      expect(() => toolSet.deactivateWhen({ unknown: () => true } as any)).toThrow();
+    });
+
+    test('should throw on an unknown tool name in approve, deny and approval', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS });
+
+      // Act & Assert
+      expect(() => toolSet.approve(['unknown' as any])).toThrow();
+      expect(() => toolSet.deny(['unknown' as any])).toThrow();
+      expect(() => toolSet.approval('unknown' as any, 'approved')).toThrow();
+      expect(() => toolSet.approval({ unknown: 'approved' } as any)).toThrow();
+    });
+
+    test('should throw on an unknown tool name in an order list', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS });
+
+      // Act & Assert
+      expect(() => toolSet.order(['unknown' as any])).toThrow();
+      expect(() => createToolSet({ tools: TOOLS, order: ['unknown' as any] })).toThrow();
+    });
+
+    test('should throw when activateWhen or deactivateWhen has no predicate', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS });
+
+      // Act & Assert
+      expect(() => (toolSet.activateWhen as any)('cancel')).toThrow();
+      expect(() => (toolSet.deactivateWhen as any)('cancel')).toThrow();
+    });
+
+    test('should throw when a predicate in object form is not a function', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS });
+
+      // Act & Assert
+      expect(() => toolSet.activateWhen({ cancel: true } as any)).toThrow();
+    });
+
+    test('should skip undefined predicates in object form', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS });
+
+      // Act
+      const { activeTools } = toolSet.activateWhen({ cancel: undefined, edit: () => false }).inferTools();
+
+      // Assert
+      expect(activeTools).toEqual(['plain', 'calc', 'cancel', 'archive']);
+    });
+
+    test('should not change the toolset when validation fails', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true });
+
+      // Act
+      expect(() => toolSet.deactivate(['plain', 'unknown' as any])).toThrow();
+
+      // Assert
+      expect(toolSet.inferTools().activeTools).toContain('plain');
+    });
+  });
+
   describe('generateText integration', () => {
     test('should pass only active tools to the model', async () => {
       // Arrange
@@ -1129,6 +1257,26 @@ describe('mutable toolset', () => {
 
       // Assert
       expect(toolSet.inferTools().activeTools).toContain('plain');
+    });
+
+    test('should accept a single tool name', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true });
+      toolSet.deactivate('plain');
+
+      // Act
+      toolSet.activate('plain');
+
+      // Assert
+      expect(toolSet.inferTools().activeTools).toContain('plain');
+    });
+
+    test('should throw on an unknown tool name', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true });
+
+      // Act & Assert
+      expect(() => toolSet.activate('unknown' as any)).toThrow();
     });
 
     test('should return the same reference', () => {
