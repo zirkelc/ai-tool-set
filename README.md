@@ -617,7 +617,7 @@ toolSet.deactivate(['search', 'list_orders']);
 ```
 
 > [!NOTE]
-> All methods that take tool names throw an error for a name that is not in the `tools` record.
+> All methods that take tool names throw an error for a name that is not in the `tools` record. This includes `{ type: 'tool', toolName }` in `.choice()`. When `.choice()` has a resolver, the check runs in `.inferTools()`.
 
 #### `.activateWhen(name, predicate)` / `.activateWhen(predicates)`
 

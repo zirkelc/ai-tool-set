@@ -987,6 +987,22 @@ describe('immutable toolset', () => {
       expect(() => createToolSet({ tools: TOOLS, order: ['unknown' as any] })).toThrow();
     });
 
+    test('should throw on an unknown tool name in a constant choice', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS });
+
+      // Act & Assert
+      expect(() => toolSet.choice({ type: 'tool', toolName: 'unknown' as any })).toThrow();
+    });
+
+    test('should throw on an unknown tool name from a choice resolver', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).choice(() => ({ type: 'tool', toolName: 'unknown' as any }));
+
+      // Act & Assert
+      expect(() => toolSet.inferTools()).toThrow();
+    });
+
     test('should throw when activateWhen or deactivateWhen has no predicate', () => {
       // Arrange
       const toolSet = createToolSet({ tools: TOOLS });

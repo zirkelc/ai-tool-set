@@ -320,6 +320,11 @@ const assertKnownTools = (tools: ToolRecord, names: Array<string>): void => {
   }
 };
 
+/** Throw if a tool choice names a tool that is not in the tool record. */
+const assertKnownToolChoice = (tools: ToolRecord, toolChoice: ToolChoice<any> | undefined): void => {
+  if (typeof toolChoice === 'object' && toolChoice.type === 'tool') assertKnownTools(tools, [toolChoice.toolName]);
+};
+
 const toActivationEntries = (
   nameOrPredicates: string | Partial<Record<string, ActivationPredicate<any, any, any, any>>>,
   predicate?: ActivationPredicate<any, any, any, any>,
@@ -505,6 +510,8 @@ class ToolSetState<
 
   /** Set the toolset's `toolChoice` — a constant {@link ToolChoice} or a resolver. Last-call wins. */
   choice(entry: AnyToolChoiceEntry): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
+    /** A resolver is checked when it runs in `inferTools()`. */
+    if (typeof entry !== 'function') assertKnownToolChoice(this.#tools, entry);
     return new ToolSetState(
       this.#tools,
       this.#activationEntries,
@@ -556,6 +563,7 @@ class ToolSetState<
     const toolChoice = (typeof lastToolChoice === 'function' ? lastToolChoice(input ?? {}) : lastToolChoice) as
       | ToolChoice<TOOLS>
       | undefined;
+    assertKnownToolChoice(this.#tools, toolChoice);
 
     /**
      * Resolve the AI SDK `toolOrder` from the strategy: all tool names in sorted order. `'insertion'`
