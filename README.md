@@ -5,9 +5,13 @@
   <img src="assets/logo-light.png" alt="ai-tool-set logo" width="400" />
 </picture>
 
-<p align="center">Conditional tool activations and approvals for the AI SDK, fully type-safe</p>
 <p align="center">
-  <a href="https://www.npmjs.com/package/ai-tool-set" alt="ai-tool-set"><img src="https://img.shields.io/npm/dt/ai-tool-set?label=ai-tool-set"></a> <a href="https://github.com/zirkelc/ai-tool-set/actions/workflows/ci.yml" alt="CI"><img src="https://img.shields.io/github/actions/workflow/status/zirkelc/ai-tool-set/ci.yml?branch=main"></a>
+  Conditional tool activations and approvals for the AI SDK, fully type-safe
+  <br/>
+  by <a href="https://x.com/zirkelc">@zirkelc</a>
+</p>
+<p align="center">
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/github/license/zirkelc/ai-tool-set" alt="License"></a> <a href="https://www.npmjs.com/package/ai-tool-set"><img src="https://img.shields.io/npm/dw/ai-tool-set" alt="Weekly downloads"></a> <a href="https://www.npmjs.com/package/ai-tool-set"><img src="https://img.shields.io/npm/dt/ai-tool-set" alt="Total downloads"></a> <a href="https://github.com/zirkelc/ai-tool-set"><img src="https://img.shields.io/github/stars/zirkelc/ai-tool-set" alt="GitHub stars"></a>
 </p>
 
 </div>
@@ -16,14 +20,19 @@ This library provides a type-safe API to manage [`activeTools`](https://ai-sdk.d
 
 ### Why?
 
-The AI SDK provides an `activeTools` parameter to control which tools the model can use, a `toolApproval` parameter to gate tool execution, and a `toolChoice` parameter to control which tool is called. However, managing this becomes complex when you need to:
+The AI SDK gives you `activeTools`, `toolApproval` and `toolChoice` to control which tools the model can use, which tool calls need approval, and which tool the model must call. But you must compute these values yourself for each call and for each step. This becomes complex when the values depend on the conversation, on the previous steps or on your own context, for example a tool that is available only to admins, or only after the user asks for it.
 
-- **Statically activate/deactivate tools**: Some tools should be inactive by default and only available after being explicitly activated
-- **Dynamically infer tool activation**: Some tools should be activated based on runtime context like the conversation history
-- **Control tool approval**: Some tools should require human approval, or be auto-approved or denied based on context
-- **Force tool choice**: Sometimes the model should be required to call a specific tool, or any tool, based on context
+`ai-tool-set` lets you declare these rules once, on the standard AI SDK [`tool()`](https://ai-sdk.dev/docs/reference/ai-sdk-core/tool) definitions. Then `.inferTools()` resolves `activeTools`, `toolApproval`, `toolChoice` and `toolOrder` for any AI SDK function.
 
-This library wraps standard AI SDK [`tool()`](https://ai-sdk.dev/docs/reference/ai-sdk-core/tool) definitions with chainable activation, approval, and choice methods, and resolves `tools`, `activeTools`, `toolApproval`, and `toolChoice` for any AI SDK function.
+### Features
+
+- **Static activation:** Turn tools on or off with `.activate()` and `.deactivate()`.
+- **Conditional activation:** Turn tools on or off from the messages, the steps or your own context with `.activateWhen()` and `.deactivateWhen()`.
+- **Tool approval:** Approve, deny or ask the user for each tool with `.approve()`, `.deny()` and `.approval()`.
+- **Tool choice:** Force a specific tool, any tool or no tool with `.choice()`.
+- **Stable tool order:** Keep the static tools in a fixed prefix, so that the provider prompt cache stays valid when a conditional tool changes.
+- **Per step:** Resolve all values again for each step in `prepareStep`.
+- **Type-safe:** Tool names are checked at compile time and at runtime, and the `Infer*` types show which tools are active, inactive or conditional.
 
 ### Installation
 
