@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.5.0](https://github.com/zirkelc/ai-tool-set/compare/v2.4.0...v2.5.0) (2026-10-24)
+
+
+### Features
+
+* track conditional tools and validate tool names ([616c16b](https://github.com/zirkelc/ai-tool-set/commit/616c16b21746e71e19de73104f1b42a94392dbd0))
+
+
+### Documentation
+
+* add byline, features section and badges to README ([7d920c6](https://github.com/zirkelc/ai-tool-set/commit/7d920c64fd65f9eee470def961e7f716b696c687))
+
 ## [2.4.0](https://github.com/zirkelc/ai-tool-set/compare/v2.3.0...v2.4.0) (2026-10-21)
 
 
