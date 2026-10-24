@@ -12,6 +12,13 @@
 
 * add byline, features section and badges to README ([7d920c6](https://github.com/zirkelc/ai-tool-set/commit/7d920c64fd65f9eee470def961e7f716b696c687))
 
+
+### Upgrade notes
+
+* `InferActiveTools` and `InferInactiveTools` now contain only tools with a static state. Tools from `activateWhen()` and `deactivateWhen()` are in the new `InferConditionalTools`. Before, `InferActiveTools` included `deactivateWhen()` tools and `InferInactiveTools` included `activateWhen()` tools. Code that depends on the old results can get type errors.
+* An immutable clone of a mutable toolset (`.clone()`) now tracks all tools as conditional. Before, its type said that all tools were active.
+* Methods that take tool names now throw an error for a name that is not in the `tools` record. TypeScript already rejected these names, so this changes only code that uses casts, JavaScript or dynamic names.
+
 ## [2.4.0](https://github.com/zirkelc/ai-tool-set/compare/v2.3.0...v2.4.0) (2026-10-21)
 
 
