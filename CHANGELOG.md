@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.6.0](https://github.com/zirkelc/ai-tool-set/compare/v2.5.1...v2.6.0) (2026-11-03)
+
+
+### Features
+
+* add activation reasons, toolStatus and inactiveTools to inferTools() ([e976979](https://github.com/zirkelc/ai-tool-set/commit/e9769793b01053f12faccfb1fb8b66ea4c340321)), closes [#21](https://github.com/zirkelc/ai-tool-set/issues/21)
+
 ## [2.5.1](https://github.com/zirkelc/ai-tool-set/compare/v2.5.0...v2.5.1) (2026-10-24)
 
 
