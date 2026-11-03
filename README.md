@@ -28,6 +28,7 @@ The AI SDK gives you `activeTools`, `toolApproval` and `toolChoice` to control w
 
 - **Static activation:** Turn tools on or off with `.activate()` and `.deactivate()`.
 - **Conditional activation:** Turn tools on or off from the messages, the steps or your own context with `.activateWhen()` and `.deactivateWhen()`.
+- **Activation reasons:** Give each activation a reason, and tell the model why a tool is not available.
 - **Tool approval:** Approve, deny or ask the user for each tool with `.approve()`, `.deny()` and `.approval()`.
 - **Tool choice:** Force a specific tool, any tool or no tool with `.choice()`.
 - **Stable tool order:** Keep the static tools in a fixed prefix, so that the provider prompt cache stays valid when a conditional tool changes.
@@ -237,6 +238,48 @@ const toolSet = createToolSet({ tools })
   // cancel_order: deactivated with conditional activation
   .activateWhen('cancel_order', ({ messages }) => hasUnfulfilledOrders(messages));
 ```
+
+### Activation Reasons
+
+The model does not see inactive tools. It does not know that a tool exists, or why it cannot use it. Give an activation a `reason`, and `.inferTools()` returns it in `toolStatus`, so that you can tell the model:
+
+```typescript
+const toolSet = createToolSet({ tools }).activateWhen('cancel_order', ({ toolSetContext }) => toolSetContext?.plan === 'pro', {
+  reason: 'Cancelling orders is not available on the free plan. The user can upgrade to the Pro plan to cancel orders.',
+});
+
+const { inactiveTools, toolStatus, ...settings } = toolSet.inferTools({ toolSetContext: { plan: 'free' } });
+const unavailable = inactiveTools
+  .filter((name) => toolStatus[name].reason)
+  .map((name) => `- ${name}: ${toolStatus[name].reason}`);
+
+const result = await generateText({
+  model,
+  ...settings,
+  instructions: `You help users with their orders.\n\nUnavailable tools:\n${unavailable.join('\n')}`,
+  prompt,
+});
+```
+
+The model does not get the `cancel_order` tool, but it can tell the user why, and that an upgrade makes it available. In a multi-step run, do the same in `prepareStep()` to update the instructions for each step.
+
+`inactiveTools` is the complement of `activeTools`: the inactive tool names in insertion order. `toolStatus` has an entry for each tool:
+
+- `active`: the same result as `activeTools`.
+- `rule`: the method of the entry that decided the state, or `'default'` when the tool has no entry.
+- `dynamic`: `true` when a predicate decides the state (`.activateWhen()` or `.deactivateWhen()`), so the state can change in a later call or step. Use it to tell the model that a tool is "not available now" and not "not available".
+- `reason`: the reason of that entry, if it has one.
+
+```typescript
+const { toolStatus } = toolSet.inferTools({ toolSetContext: { plan: 'free' } });
+
+toolStatus.search; // { active: true, rule: 'default', dynamic: false }
+toolStatus.cancel_order; // { active: false, rule: 'activateWhen', dynamic: true, reason: 'Cancelling orders is not available on the free plan. ...' }
+```
+
+The reason follows the last-call wins rule: it comes from the last entry of the tool. For `.activateWhen()` and `.deactivateWhen()`, the reason describes the condition, and `active` shows whether the predicate matched. The predicates run once, and `activeTools`, `inactiveTools` and `toolStatus` share the result.
+
+`inactiveTools` and `toolStatus` are not AI SDK options. When you spread the whole result into `generateText()` or `streamText()`, the AI SDK ignores them.
 
 ### Tool Approval
 
@@ -626,46 +669,59 @@ All tools as a standard AI SDK tool record, regardless of activation state.
 const { tools } = toolSet;
 ```
 
-#### `.activate(names)`
+#### `.activate(names, options?)`
 
 Statically activate tools by name. Accepts one tool name or an array of tool names. Returns a new instance (immutable) or `this` (mutable).
 
+- `options.reason` (optional), why the tools are active, returned in `toolStatus`. See [Activation Reasons](#activation-reasons).
+
 ```ts
 toolSet.activate('cancel_order');
-toolSet.activate(['cancel_order', 'list_orders']);
+toolSet.activate(['cancel_order', 'list_orders'], { reason: 'Enabled for this user' });
 ```
 
-#### `.deactivate(names)`
+#### `.deactivate(names, options?)`
 
 Statically deactivate tools by name. Accepts one tool name or an array of tool names. Returns a new instance (immutable) or `this` (mutable).
 
+- `options.reason` (optional), why the tools are inactive, returned in `toolStatus`. See [Activation Reasons](#activation-reasons).
+
 ```ts
 toolSet.deactivate('search');
-toolSet.deactivate(['search', 'list_orders']);
+toolSet.deactivate(['search', 'list_orders'], { reason: 'Read-only mode' });
 ```
 
 > [!NOTE]
 > All methods that take tool names throw an error for a name that is not in the `tools` record. This includes `{ type: 'tool', toolName }` in `.choice()`. When `.choice()` has a resolver, the check runs in `.inferTools()`.
 
-#### `.activateWhen(name, predicate)` / `.activateWhen(predicates)`
+#### `.activateWhen(name, predicate, options?)` / `.activateWhen(predicates, options?)`
 
 Conditionally activate tools. The predicate receives `{ messages, steps, toolSetContext }` and returns `true` to activate. All fields can be `undefined` if not provided to `inferTools`. Returning `undefined` is treated as `false`.
+
+- `options.reason` (optional), the condition of the tools, returned in `toolStatus`. In the record form, the reason applies to all tools in the record. See [Activation Reasons](#activation-reasons).
 
 ```ts
 toolSet.activateWhen('cancel_order', ({ messages }) => messages?.some((m) => hasOrders(m)));
 
-toolSet.activateWhen({
-  cancel_order: ({ messages }) => messages?.some((m) => hasOrders(m)),
-  list_orders: ({ toolSetContext }) => toolSetContext?.isAuthenticated,
-});
+toolSet.activateWhen(
+  {
+    cancel_order: ({ toolSetContext }) => toolSetContext?.isAuthenticated,
+    list_orders: ({ toolSetContext }) => toolSetContext?.isAuthenticated,
+  },
+  { reason: 'Only for signed-in users' },
+);
 ```
 
-#### `.deactivateWhen(name, predicate)` / `.deactivateWhen(predicates)`
+#### `.deactivateWhen(name, predicate, options?)` / `.deactivateWhen(predicates, options?)`
 
 Conditionally deactivate tools. The predicate receives `{ messages, steps, toolSetContext }` and returns `true` to deactivate. All fields can be `undefined` if not provided to `inferTools`. Returning `undefined` is treated as `false` (tool stays active).
 
+- `options.reason` (optional), the condition of the tools, returned in `toolStatus`. See [Activation Reasons](#activation-reasons).
+
 ```ts
-toolSet.deactivateWhen('search', ({ messages }) => messages && messages.length > 10);
+toolSet.deactivateWhen('search', ({ messages }) => messages && messages.length > 10, {
+  reason: 'Search is off in long conversations',
+});
 ```
 
 #### `.approve(names)`
@@ -742,14 +798,14 @@ toolSet.order((a, b) => a.toolName.localeCompare(b.toolName));
 
 #### `.inferTools(input?)`
 
-Evaluate all predicates, approval resolvers, the tool-choice entry, and the order strategy and return `{ tools, activeTools, toolApproval, toolChoice, toolOrder }`, directly spreadable into `generateText()`, `streamText()`, or a `prepareStep` return. The input is optional; all fields are optional. Predicates and resolvers receive `undefined` for fields not provided.
+Evaluate all predicates, approval resolvers, the tool-choice entry, and the order strategy and return `{ tools, activeTools, toolApproval, toolChoice, toolOrder, inactiveTools, toolStatus }`, directly spreadable into `generateText()`, `streamText()`, or a `prepareStep` return. The input is optional; all fields are optional. Predicates and resolvers receive `undefined` for fields not provided.
 
 - `input` (optional):
   - `messages` (optional), the current conversation messages
   - `steps` (optional), the completed steps of the current run (the [`StepResult`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text) array from `prepareStep`)
   - `toolSetContext` (optional), arbitrary values passed to predicates, approval resolvers, and the tool-choice resolver
 
-The result includes `toolChoice` when set via `.choice()` (otherwise `undefined`), and `toolOrder` when `.order()` is anything other than `'insertion'` (otherwise `undefined`).
+The result includes `toolChoice` when set via `.choice()` (otherwise `undefined`), and `toolOrder` when `.order()` is anything other than `'insertion'` (otherwise `undefined`). The result also has `inactiveTools` and `toolStatus`, the inactive tool names and the activation status of each tool. They are not AI SDK options, and the AI SDK ignores them in a spread. See [Activation Reasons](#activation-reasons).
 
 ```ts
 // Spread the whole result into generateText / streamText
@@ -933,6 +989,23 @@ type Resolved = ResolvedToolSet<typeof tools>;
 //   toolApproval: { search?: ...; list_orders?: ...; cancel_order?: ... };
 //   toolChoice?: ToolChoice<typeof tools>;
 //   toolOrder?: Array<'search' | 'list_orders' | 'cancel_order'>;
+//   inactiveTools: Array<'search' | 'list_orders' | 'cancel_order'>;
+//   toolStatus: { search: ToolStatus; list_orders: ToolStatus; cancel_order: ToolStatus };
+// }
+```
+
+### `ToolStatus`
+
+The status of one tool in `toolStatus`. See [Activation Reasons](#activation-reasons):
+
+```ts
+import type { ToolStatus } from 'ai-tool-set';
+
+// {
+//   active: boolean;
+//   rule: 'default' | 'activate' | 'deactivate' | 'activateWhen' | 'deactivateWhen';
+//   dynamic: boolean;
+//   reason?: string;
 // }
 ```
 

@@ -1,5 +1,7 @@
 export {
   createToolSet,
+  type ActivationOptions,
+  type ActivationRule,
   type AnyToolSet,
   type InferActiveTools,
   type InferAllTools,
@@ -11,4 +13,5 @@ export {
   type InferUIToolSet,
   type ResolvedToolSet,
   type ToolSet,
+  type ToolStatus,
 } from './tool-set.js';

@@ -863,6 +863,199 @@ describe('immutable toolset', () => {
     });
   });
 
+  describe('toolStatus', () => {
+    test('should report the default rule for a tool without an entry', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS });
+
+      // Act
+      const { toolStatus } = toolSet.inferTools();
+
+      // Assert
+      expect(Object.keys(toolStatus)).toEqual(['plain', 'calc', 'cancel', 'edit', 'archive']);
+      expect(toolStatus.plain).toEqual({ active: true, rule: 'default', dynamic: false });
+    });
+
+    test('should report the rule and reason of activate and deactivate', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS })
+        .deactivate(['cancel', 'edit'], { reason: 'Read-only mode' })
+        .activate('edit', { reason: 'Enabled for this user' })
+        .deactivate('archive');
+
+      // Act
+      const { toolStatus } = toolSet.inferTools();
+
+      // Assert
+      expect(toolStatus.cancel).toEqual({
+        active: false,
+        rule: 'deactivate',
+        dynamic: false,
+        reason: 'Read-only mode',
+      });
+      expect(toolStatus.edit).toEqual({
+        active: true,
+        rule: 'activate',
+        dynamic: false,
+        reason: 'Enabled for this user',
+      });
+      expect(toolStatus.archive).toEqual({ active: false, rule: 'deactivate', dynamic: false });
+    });
+
+    test('should report the predicate result with the rule and reason of activateWhen and deactivateWhen', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS })
+        .activateWhen('cancel', () => false, { reason: 'Admins only' })
+        .deactivateWhen('plain', () => true, { reason: 'Limit reached' })
+        .deactivateWhen('calc', () => false, { reason: 'Limit reached' });
+
+      // Act
+      const { toolStatus } = toolSet.inferTools();
+
+      // Assert
+      expect(toolStatus.cancel).toEqual({ active: false, rule: 'activateWhen', dynamic: true, reason: 'Admins only' });
+      expect(toolStatus.plain).toEqual({
+        active: false,
+        rule: 'deactivateWhen',
+        dynamic: true,
+        reason: 'Limit reached',
+      });
+      expect(toolStatus.calc).toEqual({ active: true, rule: 'deactivateWhen', dynamic: true, reason: 'Limit reached' });
+    });
+
+    test('should apply one reason to all tools in the record form', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).activateWhen(
+        { cancel: () => true, edit: () => false },
+        { reason: 'Admins only' },
+      );
+
+      // Act
+      const { toolStatus } = toolSet.inferTools();
+
+      // Assert
+      expect(toolStatus.cancel).toEqual({ active: true, rule: 'activateWhen', dynamic: true, reason: 'Admins only' });
+      expect(toolStatus.edit).toEqual({ active: false, rule: 'activateWhen', dynamic: true, reason: 'Admins only' });
+    });
+
+    test('should take the reason from the last entry, and drop it when that entry has none', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS })
+        .deactivate('cancel', { reason: 'Read-only mode' })
+        .activate('cancel');
+
+      // Act
+      const { toolStatus } = toolSet.inferTools();
+
+      // Assert
+      expect(toolStatus.cancel).toEqual({ active: true, rule: 'activate', dynamic: false });
+    });
+
+    test('should agree with activeTools and run each predicate once', () => {
+      // Arrange
+      let calls = 0;
+      const toolSet = createToolSet({ tools: TOOLS }).activateWhen('cancel', () => {
+        calls++;
+        return calls % 2 === 1;
+      });
+
+      // Act
+      const { activeTools, toolStatus } = toolSet.inferTools();
+
+      // Assert
+      expect(calls).toBe(1);
+      expect(activeTools).toContain('cancel');
+      expect(toolStatus.cancel.active).toBe(true);
+    });
+
+    test('should evaluate predicates with the inferTools input', () => {
+      // Arrange
+      const toolSet = createToolSet<typeof TOOLS, UIMessage, { isAdmin: boolean }>({ tools: TOOLS }).activateWhen(
+        'cancel',
+        ({ toolSetContext }) => toolSetContext?.isAdmin,
+        { reason: 'Admins only' },
+      );
+
+      // Act
+      const guest = toolSet.inferTools({ toolSetContext: { isAdmin: false } });
+      const admin = toolSet.inferTools({ toolSetContext: { isAdmin: true } });
+
+      // Assert
+      expect(guest.toolStatus.cancel.active).toBe(false);
+      expect(admin.toolStatus.cancel.active).toBe(true);
+    });
+
+    test('should keep a tool named __proto__ as an own key', () => {
+      // Arrange
+      const tools: Record<string, (typeof TOOLS)['plain']> = { plain: TOOLS.plain };
+      Object.defineProperty(tools, '__proto__', {
+        value: TOOLS.calc,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+      const toolSet = createToolSet({ tools })
+        .deactivate('__proto__', { reason: 'Reserved name' })
+        .approve('__proto__');
+
+      // Act
+      const { toolStatus, toolApproval } = toolSet.inferTools();
+
+      // Assert
+      expect(Object.keys(toolStatus)).toEqual(['plain', '__proto__']);
+      expect(Object.getOwnPropertyDescriptor(toolStatus, '__proto__')?.value).toEqual({
+        active: false,
+        rule: 'deactivate',
+        dynamic: false,
+        reason: 'Reserved name',
+      });
+      expect(Object.keys(toolApproval)).toEqual(['__proto__']);
+    });
+
+    test('should return toolStatus and toolApproval as plain objects', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).deactivate('cancel').approve('edit');
+
+      // Act
+      const { toolStatus, toolApproval } = toolSet.inferTools();
+
+      // Assert
+      expect(Object.getPrototypeOf(toolStatus)).toBe(Object.prototype);
+      expect(Object.getPrototypeOf(toolApproval)).toBe(Object.prototype);
+      expect(toolApproval).toStrictEqual({ edit: 'approved' });
+    });
+
+    test('should return the inactive tools in insertion order', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS })
+        .deactivate(['archive', 'plain'])
+        .activateWhen('cancel', () => false);
+
+      // Act
+      const { activeTools, inactiveTools } = toolSet.inferTools();
+
+      // Assert
+      expect(inactiveTools).toEqual(['plain', 'cancel', 'archive']);
+      expect(activeTools).toEqual(['calc', 'edit']);
+    });
+
+    test('should keep reasons in a clone', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS }).deactivate('cancel', { reason: 'Read-only mode' });
+
+      // Act
+      const { toolStatus } = toolSet.clone({ mutable: true }).inferTools();
+
+      // Assert
+      expect(toolStatus.cancel).toEqual({
+        active: false,
+        rule: 'deactivate',
+        dynamic: false,
+        reason: 'Read-only mode',
+      });
+    });
+  });
+
   describe('chaining', () => {
     test('should support method chaining', () => {
       // Arrange & Act
@@ -1031,6 +1224,38 @@ describe('immutable toolset', () => {
       expect(activeTools).toEqual(['plain', 'calc', 'cancel', 'archive']);
     });
 
+    test('should throw when a reason is not a string', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS });
+
+      // Act & Assert
+      expect(() => toolSet.activate('cancel', { reason: 1 } as any)).toThrow();
+      expect(() => toolSet.deactivate('cancel', { reason: 1 } as any)).toThrow();
+      expect(() => toolSet.activateWhen('cancel', () => true, { reason: 1 } as any)).toThrow();
+      expect(() => toolSet.deactivateWhen({ cancel: () => true }, { reason: 1 } as any)).toThrow();
+    });
+
+    test('should throw when the options are not an object', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS });
+
+      // Act & Assert
+      expect(() => toolSet.activate('cancel', 'Read-only mode' as any)).toThrow();
+      expect(() => toolSet.deactivate('cancel', 'Read-only mode' as any)).toThrow();
+      expect(() => toolSet.activateWhen('cancel', () => true, 'Admins only' as any)).toThrow();
+      expect(() => toolSet.deactivateWhen({ cancel: () => true }, null as any)).toThrow();
+      expect(() => toolSet.activateWhen({ cancel: () => true }, (() => true) as any)).toThrow();
+    });
+
+    test('should throw when the record form gets the options as the third argument', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS });
+
+      // Act & Assert
+      expect(() => (toolSet.activateWhen as any)({ cancel: () => true }, undefined, { reason: 'x' })).toThrow();
+      expect(() => (toolSet.deactivateWhen as any)({ cancel: () => true }, undefined, { reason: 'x' })).toThrow();
+    });
+
     test('should not change the toolset when validation fails', () => {
       // Arrange
       const toolSet = createToolSet({ tools: TOOLS, mutable: true });
@@ -1044,6 +1269,68 @@ describe('immutable toolset', () => {
   });
 
   describe('generateText integration', () => {
+    test('should spread the whole result into generateText, which ignores inactiveTools and toolStatus', async () => {
+      // Arrange
+      const model = MockLanguageModel.from('Done');
+      const toolSet = createToolSet({ tools: TOOLS })
+        .deactivate('cancel', { reason: 'Not available on the free plan' })
+        .deactivate('archive');
+      const result = toolSet.inferTools();
+      const unavailable = result.inactiveTools
+        .filter((name) => result.toolStatus[name].reason)
+        .map((name) => `- ${name}: ${result.toolStatus[name].reason}`);
+
+      // Act
+      await generateText({
+        model,
+        ...result,
+        instructions: `Unavailable tools:\n${unavailable.join('\n')}`,
+        prompt: 'Hello',
+      });
+
+      // Assert
+      const callOptions = model.doGenerate.mock.calls[0]![0];
+      expect(callOptions.prompt[0]).toEqual({
+        role: 'system',
+        content: 'Unavailable tools:\n- cancel: Not available on the free plan',
+      });
+      expect(getToolNames(model)).toEqual(['plain', 'calc', 'edit']);
+      expect('inactiveTools' in callOptions).toBe(false);
+      expect('toolStatus' in callOptions).toBe(false);
+    });
+
+    test('should spread the whole result into the prepareStep result, which ignores inactiveTools and toolStatus', async () => {
+      // Arrange
+      const model = MockLanguageModel.from('Done');
+      const toolSet = createToolSet({ tools: TOOLS })
+        .deactivate('cancel', { reason: 'Not available on the free plan' })
+        .deactivate('archive');
+
+      // Act
+      await generateText({
+        model,
+        tools: toolSet.tools,
+        prompt: 'Hello',
+        prepareStep: ({ steps }) => {
+          const result = toolSet.inferTools({ steps });
+          const unavailable = result.inactiveTools
+            .filter((name) => result.toolStatus[name].reason)
+            .map((name) => `- ${name}: ${result.toolStatus[name].reason}`);
+          return { ...result, instructions: `Unavailable tools:\n${unavailable.join('\n')}` };
+        },
+      });
+
+      // Assert
+      const callOptions = model.doGenerate.mock.calls[0]![0];
+      expect(callOptions.prompt[0]).toEqual({
+        role: 'system',
+        content: 'Unavailable tools:\n- cancel: Not available on the free plan',
+      });
+      expect(getToolNames(model)).toEqual(['plain', 'calc', 'edit']);
+      expect('inactiveTools' in callOptions).toBe(false);
+      expect('toolStatus' in callOptions).toBe(false);
+    });
+
     test('should pass only active tools to the model', async () => {
       // Arrange
       const model = MockLanguageModel.from('Done');
@@ -1584,6 +1871,28 @@ describe('mutable toolset', () => {
 
       // Assert
       expect(toolSet.inferTools().toolOrder).toEqual(['edit', 'plain', 'calc', 'cancel', 'archive']);
+    });
+  });
+
+  describe('toolStatus', () => {
+    test('should report the rule and reason of each entry', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true });
+      toolSet.deactivate('cancel', { reason: 'Read-only mode' });
+      toolSet.activateWhen({ edit: () => false }, { reason: 'Admins only' });
+
+      // Act
+      const { toolStatus } = toolSet.inferTools();
+
+      // Assert
+      expect(toolStatus.plain).toEqual({ active: true, rule: 'default', dynamic: false });
+      expect(toolStatus.cancel).toEqual({
+        active: false,
+        rule: 'deactivate',
+        dynamic: false,
+        reason: 'Read-only mode',
+      });
+      expect(toolStatus.edit).toEqual({ active: false, rule: 'activateWhen', dynamic: true, reason: 'Admins only' });
     });
   });
 

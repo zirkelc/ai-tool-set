@@ -15,6 +15,7 @@ import {
   type InferUIToolSet,
   type ResolvedToolSet,
   type ToolSet,
+  type ToolStatus,
 } from '../tool-set.js';
 import { TOOLS, type MyUIMessage, plainTool, calcTool, cancelTool, editTool, archiveTool } from './fixtures.js';
 
@@ -385,6 +386,16 @@ describe('exported types', () => {
       expectTypeOf(result.activeTools).toEqualTypeOf<Array<keyof typeof TOOLS & string>>();
     });
 
+    test('should return toolStatus with a key for each tool', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      const result = toolSet.inferTools();
+      expectTypeOf(result.toolStatus).toEqualTypeOf<{ [K in keyof typeof TOOLS & string]: ToolStatus }>();
+      expectTypeOf(result.toolStatus.cancel.active).toEqualTypeOf<boolean>();
+      expectTypeOf(result.toolStatus.cancel.dynamic).toEqualTypeOf<boolean>();
+      expectTypeOf(result.inactiveTools).toEqualTypeOf<Array<keyof typeof TOOLS & string>>();
+      expectTypeOf(result.toolStatus.cancel.reason).toEqualTypeOf<string | undefined>();
+    });
+
     test('should accept a toolset without context', () => {
       const toolSet = createToolSet<typeof TOOLS, UIMessage, MyCtx>({ tools: TOOLS });
       run({ toolSet });
@@ -450,6 +461,14 @@ describe('immutable toolset', () => {
       toolSet.deactivate(['plain']).activate(['plain']);
       toolSet.activate(['plain']).deactivate(['plain']);
     });
+
+    test('should accept a reason', () => {
+      const toolSet = createToolSet({ tools: TOOLS })
+        .activate('cancel', { reason: 'Enabled for this user' })
+        .deactivate(['edit', 'archive'], { reason: 'Read-only mode' });
+      expectTypeOf<InferActiveTools<typeof toolSet>>().toEqualTypeOf<'plain' | 'calc' | 'cancel'>();
+      expectTypeOf<InferInactiveTools<typeof toolSet>>().toEqualTypeOf<'edit' | 'archive'>();
+    });
   });
 
   describe('activateWhen / deactivateWhen', () => {
@@ -497,6 +516,33 @@ describe('immutable toolset', () => {
       toolSet.deactivateWhen('plain', ({ steps }) =>
         steps?.some((s) => s.staticToolCalls.some((c) => c.toolName === 'plain')),
       );
+    });
+
+    test('should accept a reason in both forms', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      toolSet.activateWhen('cancel', () => true, { reason: 'Admins only' });
+      toolSet.deactivateWhen('plain', () => true, { reason: 'Limit reached' });
+      toolSet.activateWhen({ cancel: () => true, edit: () => false }, { reason: 'Admins only' });
+      toolSet.deactivateWhen({ plain: () => true }, { reason: 'Limit reached' });
+    });
+
+    test('should track names as conditional when a reason is given', () => {
+      const toolSet = createToolSet({ tools: TOOLS })
+        .activateWhen('cancel', () => true, { reason: 'Admins only' })
+        .deactivateWhen({ plain: () => true }, { reason: 'Limit reached' });
+      expectTypeOf<InferConditionalTools<typeof toolSet>>().toEqualTypeOf<'cancel' | 'plain'>();
+    });
+
+    test('should reject options in place of the predicate', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      // @ts-expect-error: the single-name form needs a predicate
+      toolSet.activateWhen('cancel', { reason: 'Admins only' });
+    });
+
+    test('should reject a reason that is not a string', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      // @ts-expect-error: reason must be a string
+      toolSet.activateWhen('cancel', () => true, { reason: 1 });
     });
   });
 
@@ -852,6 +898,14 @@ describe('mutable toolset', () => {
       toolSet.deactivateWhen('plain', () => undefined);
       toolSet.activateWhen('cancel', ({ messages }) => messages?.some((m) => m.parts.length > 0));
       toolSet.deactivateWhen('plain', ({ messages }) => messages?.some((m) => m.parts.length > 0));
+    });
+
+    test('should accept a reason in both forms', () => {
+      const toolSet = createToolSet({ tools: TOOLS, mutable: true });
+      toolSet.activate('cancel', { reason: 'Enabled for this user' });
+      toolSet.deactivate(['edit'], { reason: 'Read-only mode' });
+      toolSet.activateWhen('cancel', () => true, { reason: 'Admins only' });
+      toolSet.deactivateWhen({ plain: () => true }, { reason: 'Limit reached' });
     });
   });
 
