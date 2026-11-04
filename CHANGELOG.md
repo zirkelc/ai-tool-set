@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.7.0](https://github.com/zirkelc/ai-tool-set/compare/v2.6.0...v2.7.0) (2026-11-04)
+
+
+### Features
+
+* let an activation predicate return { active, reason } ([960a24c](https://github.com/zirkelc/ai-tool-set/commit/960a24cfe3b76e0696d7d3cb406e81ca539300f0)), closes [#24](https://github.com/zirkelc/ai-tool-set/issues/24)
+
 ## [2.6.0](https://github.com/zirkelc/ai-tool-set/compare/v2.5.1...v2.6.0) (2026-11-03)
 
 
