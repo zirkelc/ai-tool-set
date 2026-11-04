@@ -97,13 +97,26 @@ export type InferToolsInput<
   toolSetContext?: TOOLSET_CONTEXT;
 };
 
-/** Activation predicate — returns true if tool should be active. Undefined is treated as false. */
+/** The status that a predicate can return in place of a boolean. It states the tool status directly, in both methods. */
+export type ActivationResult = {
+  active: boolean;
+  /** Wins over the reason of the activation options. */
+  reason?: string;
+};
+
+/**
+ * Activation predicate. A boolean keeps the meaning of the method (`true` activates in `activateWhen`
+ * and deactivates in `deactivateWhen`), and undefined is treated as false. An `ActivationResult` states
+ * the tool status directly.
+ */
 type ActivationPredicate<
   TOOLS extends ToolRecord = ToolRecord,
   MESSAGE extends MessageType = UIMessage,
   TOOLSET_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
   RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
-> = (input: InferToolsInput<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>) => boolean | undefined;
+> = (
+  input: InferToolsInput<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT>,
+) => boolean | undefined | ActivationResult;
 
 /** Options for the activation methods (`activate`, `deactivate`, `activateWhen`, `deactivateWhen`). */
 export type ActivationOptions = {
@@ -131,7 +144,7 @@ export type ToolStatus = {
 
 type StoredActivationEntry = {
   toolName: string;
-  resolve: (input: InferToolsInput<any, any, any, any>) => boolean | undefined;
+  resolve: (input: InferToolsInput<any, any, any, any>) => ActivationResult;
   rule: Exclude<ActivationRule, 'default'>;
   reason?: string;
 };
@@ -381,6 +394,26 @@ const toReason = (options: ActivationOptions | undefined): string | undefined =>
 };
 
 /**
+ * Convert the return value of a predicate to an `ActivationResult`. A boolean is inverted for
+ * `deactivateWhen`, and an object is used as-is after validation.
+ */
+const toActivationResult = (
+  value: boolean | undefined | ActivationResult,
+  rule: 'activateWhen' | 'deactivateWhen',
+): ActivationResult => {
+  if (typeof value !== 'object' || value === null) {
+    return { active: rule === 'activateWhen' ? Boolean(value) : !value };
+  }
+  if (typeof value.active !== 'boolean') {
+    throw new Error('The active field of an activation result must be a boolean');
+  }
+  if (value.reason !== undefined && typeof value.reason !== 'string') {
+    throw new Error('Activation reason must be a string');
+  }
+  return value;
+};
+
+/**
  * Normalize the arguments of `activateWhen`/`deactivateWhen`. The single-name form takes
  * `(name, predicate, options)` and the record form takes `(predicates, options)`.
  */
@@ -402,7 +435,8 @@ const toActivationEntries = (
     if (typeof pred !== 'function') {
       throw new Error(`Predicate for tool "${name}" must be a function`);
     }
-    return { toolName: name, resolve: pred as ActivationPredicate<any, any, any, any>, rule, reason };
+    const predicate = pred as ActivationPredicate<any, any, any, any>;
+    return { toolName: name, resolve: (input) => toActivationResult(predicate(input), rule), rule, reason };
   });
 };
 
@@ -478,7 +512,12 @@ class ToolSetState<
   ): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
     const reason = toReason(options);
     const newEntries = this.#knownNames(names).map(
-      (name): StoredActivationEntry => ({ toolName: name, resolve: () => true, rule: 'activate', reason }),
+      (name): StoredActivationEntry => ({
+        toolName: name,
+        resolve: () => ({ active: true }),
+        rule: 'activate',
+        reason,
+      }),
     );
     return new ToolSetState(
       this.#tools,
@@ -495,7 +534,12 @@ class ToolSetState<
   ): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
     const reason = toReason(options);
     const newEntries = this.#knownNames(names).map(
-      (name): StoredActivationEntry => ({ toolName: name, resolve: () => false, rule: 'deactivate', reason }),
+      (name): StoredActivationEntry => ({
+        toolName: name,
+        resolve: () => ({ active: false }),
+        rule: 'deactivate',
+        reason,
+      }),
     );
     return new ToolSetState(
       this.#tools,
@@ -531,10 +575,7 @@ class ToolSetState<
     options?: ActivationOptions,
   ): ToolSetState<TOOLS, MESSAGE, TOOLSET_CONTEXT, RUNTIME_CONTEXT> {
     const entries = toActivationEntries('deactivateWhen', nameOrPredicates, predicateOrOptions, options);
-    const newEntries = this.#knownEntries(entries).map((e) => ({
-      ...e,
-      resolve: (input: InferToolsInput<any, any, any, any>) => !e.resolve(input),
-    }));
+    const newEntries = this.#knownEntries(entries);
     return new ToolSetState(
       this.#tools,
       [...this.#activationEntries, ...newEntries],
@@ -627,14 +668,10 @@ class ToolSetState<
       const dynamic = isDynamicRule(rule);
       orderEntries.set(name, { toolName: name, tool: this.#tools[name]!, dynamic, index });
       /** A predicate runs once, and its result is shared by `activeTools` and `toolStatus`. */
-      const active = lastEntry ? Boolean(lastEntry.resolve(input ?? {})) : true;
-      setOwn(
-        toolStatus,
-        name,
-        lastEntry?.reason === undefined
-          ? { active, rule, dynamic }
-          : { active, rule, dynamic, reason: lastEntry.reason },
-      );
+      const result = lastEntry ? lastEntry.resolve(input ?? {}) : { active: true };
+      const active = result.active;
+      const reason = result.reason ?? lastEntry?.reason;
+      setOwn(toolStatus, name, reason === undefined ? { active, rule, dynamic } : { active, rule, dynamic, reason });
       (active ? activeTools : inactiveTools).push(name);
     });
 

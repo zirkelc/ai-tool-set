@@ -4,6 +4,7 @@ import { describe, expectTypeOf, test } from 'vitest';
 import { z } from 'zod';
 import {
   createToolSet,
+  type ActivationResult,
   type AnyToolSet,
   type InferActiveTools,
   type InferAllTools,
@@ -543,6 +544,22 @@ describe('immutable toolset', () => {
       const toolSet = createToolSet({ tools: TOOLS });
       // @ts-expect-error: reason must be a string
       toolSet.activateWhen('cancel', () => true, { reason: 1 });
+    });
+
+    test('should accept an activation result from a predicate', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      toolSet.activateWhen('cancel', () => ({ active: false, reason: 'Not available on the free plan' }));
+      toolSet.deactivateWhen('plain', () => ({ active: true }));
+      toolSet.activateWhen({ cancel: () => (Math.random() > 0.5 ? true : { active: false, reason: 'Admins only' }) });
+      expectTypeOf<ActivationResult>().toEqualTypeOf<{ active: boolean; reason?: string }>();
+    });
+
+    test('should reject an activation result with an invalid active or reason', () => {
+      const toolSet = createToolSet({ tools: TOOLS });
+      // @ts-expect-error: active must be a boolean
+      toolSet.activateWhen('cancel', () => ({ active: 'no' }));
+      // @ts-expect-error: reason must be a string
+      toolSet.activateWhen('cancel', () => ({ active: false, reason: 1 }));
     });
   });
 

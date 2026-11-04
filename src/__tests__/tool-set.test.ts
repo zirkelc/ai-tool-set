@@ -938,6 +938,119 @@ describe('immutable toolset', () => {
       expect(toolStatus.edit).toEqual({ active: false, rule: 'activateWhen', dynamic: true, reason: 'Admins only' });
     });
 
+    test('should take the state and reason from an object that a predicate returns', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS })
+        .activateWhen('cancel', () => ({ active: false, reason: 'Not available on the free plan' }))
+        .activateWhen('edit', () => ({ active: true, reason: 'Enabled for this user' }));
+
+      // Act
+      const { activeTools, toolStatus } = toolSet.inferTools();
+
+      // Assert
+      expect(activeTools).toEqual(['plain', 'calc', 'edit', 'archive']);
+      expect(toolStatus.cancel).toEqual({
+        active: false,
+        rule: 'activateWhen',
+        dynamic: true,
+        reason: 'Not available on the free plan',
+      });
+      expect(toolStatus.edit).toEqual({
+        active: true,
+        rule: 'activateWhen',
+        dynamic: true,
+        reason: 'Enabled for this user',
+      });
+    });
+
+    test('should not invert an object that a deactivateWhen predicate returns', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS })
+        .deactivateWhen('cancel', () => ({ active: false, reason: 'Limit reached' }))
+        .deactivateWhen('edit', () => ({ active: true }));
+
+      // Act
+      const { activeTools, toolStatus } = toolSet.inferTools();
+
+      // Assert
+      expect(activeTools).toEqual(['plain', 'calc', 'edit', 'archive']);
+      expect(toolStatus.cancel).toEqual({
+        active: false,
+        rule: 'deactivateWhen',
+        dynamic: true,
+        reason: 'Limit reached',
+      });
+      expect(toolStatus.edit).toEqual({ active: true, rule: 'deactivateWhen', dynamic: true });
+    });
+
+    test('should prefer the reason of the object over the reason of the options', () => {
+      // Arrange
+      const toolSet = createToolSet({ tools: TOOLS })
+        .activateWhen('cancel', () => ({ active: false, reason: 'From the predicate' }), { reason: 'From the options' })
+        .activateWhen('edit', () => ({ active: false }), { reason: 'From the options' });
+
+      // Act
+      const { toolStatus } = toolSet.inferTools();
+
+      // Assert
+      expect(toolStatus.cancel.reason).toBe('From the predicate');
+      expect(toolStatus.edit.reason).toBe('From the options');
+    });
+
+    test('should use the reason of the options when a predicate that can return an object returns a boolean', () => {
+      // Arrange
+      type Context = { loggedIn: boolean; plan: 'free' | 'pro' };
+      const toolSet = createToolSet<typeof TOOLS, UIMessage, Context>({ tools: TOOLS }).activateWhen(
+        'cancel',
+        ({ toolSetContext }) => {
+          if (!toolSetContext?.loggedIn) return { active: false, reason: 'The user is not logged in' };
+          return toolSetContext.plan === 'pro';
+        },
+        { reason: 'Not available on the free plan' },
+      );
+
+      // Act
+      const loggedOut = toolSet.inferTools({ toolSetContext: { loggedIn: false, plan: 'free' } });
+      const free = toolSet.inferTools({ toolSetContext: { loggedIn: true, plan: 'free' } });
+
+      // Assert
+      expect(loggedOut.toolStatus.cancel).toEqual({
+        active: false,
+        rule: 'activateWhen',
+        dynamic: true,
+        reason: 'The user is not logged in',
+      });
+      expect(free.toolStatus.cancel).toEqual({
+        active: false,
+        rule: 'activateWhen',
+        dynamic: true,
+        reason: 'Not available on the free plan',
+      });
+    });
+
+    test('should give the reason of the condition that failed when one predicate checks several conditions', () => {
+      // Arrange
+      type Context = { loggedIn: boolean; plan: 'free' | 'pro' };
+      const toolSet = createToolSet<typeof TOOLS, UIMessage, Context>({ tools: TOOLS }).activateWhen(
+        'cancel',
+        ({ toolSetContext }) => {
+          if (!toolSetContext?.loggedIn) return { active: false, reason: 'The user is not logged in' };
+          if (toolSetContext.plan === 'free') return { active: false, reason: 'Not available on the free plan' };
+          return true;
+        },
+      );
+
+      // Act
+      const loggedOut = toolSet.inferTools({ toolSetContext: { loggedIn: false, plan: 'pro' } });
+      const free = toolSet.inferTools({ toolSetContext: { loggedIn: true, plan: 'free' } });
+      const pro = toolSet.inferTools({ toolSetContext: { loggedIn: true, plan: 'pro' } });
+
+      // Assert
+      expect(loggedOut.toolStatus.cancel.reason).toBe('The user is not logged in');
+      expect(free.toolStatus.cancel.reason).toBe('Not available on the free plan');
+      expect(pro.toolStatus.cancel).toEqual({ active: true, rule: 'activateWhen', dynamic: true });
+    });
+
     test('should take the reason from the last entry, and drop it when that entry has none', () => {
       // Arrange
       const toolSet = createToolSet({ tools: TOOLS })
@@ -1233,6 +1346,19 @@ describe('immutable toolset', () => {
       expect(() => toolSet.deactivate('cancel', { reason: 1 } as any)).toThrow();
       expect(() => toolSet.activateWhen('cancel', () => true, { reason: 1 } as any)).toThrow();
       expect(() => toolSet.deactivateWhen({ cancel: () => true }, { reason: 1 } as any)).toThrow();
+    });
+
+    test('should throw when a predicate returns an object with an invalid active or reason', () => {
+      // Arrange
+      const badActive = createToolSet({ tools: TOOLS }).activateWhen('cancel', () => ({ active: 'no' }) as any);
+      const badReason = createToolSet({ tools: TOOLS }).deactivateWhen(
+        'cancel',
+        () => ({ active: false, reason: 1 }) as any,
+      );
+
+      // Act & Assert
+      expect(() => badActive.inferTools()).toThrow();
+      expect(() => badReason.inferTools()).toThrow();
     });
 
     test('should throw when the options are not an object', () => {

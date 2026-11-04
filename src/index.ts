@@ -1,6 +1,7 @@
 export {
   createToolSet,
   type ActivationOptions,
+  type ActivationResult,
   type ActivationRule,
   type AnyToolSet,
   type InferActiveTools,

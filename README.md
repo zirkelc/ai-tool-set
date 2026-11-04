@@ -244,11 +244,30 @@ const toolSet = createToolSet({ tools })
 The model does not see inactive tools. It does not know that a tool exists, or why it cannot use it. Give an activation a `reason`, and `.inferTools()` returns it in `toolStatus`, so that you can tell the model:
 
 ```typescript
-const toolSet = createToolSet({ tools }).activateWhen('cancel_order', ({ toolSetContext }) => toolSetContext?.plan === 'pro', {
-  reason: 'Cancelling orders is not available on the free plan. The user can upgrade to the Pro plan to cancel orders.',
-});
+const toolSet = createToolSet({ tools })
+  // pass the reason as the third argument
+  .activateWhen(
+    'list_orders',
+    ({ toolSetContext }) => toolSetContext?.isAuthenticated === true,
+    { reason: 'The user is not logged in. Ask the user to log in.' }
+  )
+  // return the reason from the predicate
+  .activateWhen(
+    'cancel_order',
+    ({ toolSetContext }) => {
+      if (!toolSetContext?.isAuthenticated)
+        return { active: false, reason: 'The user is not logged in. Ask the user to log in.' };
+      if (toolSetContext.plan === 'free')
+        return { active: false, reason: 'Not available on the free plan. The user can upgrade to Pro.' };
 
-const { inactiveTools, toolStatus, ...settings } = toolSet.inferTools({ toolSetContext: { plan: 'free' } });
+      return true;
+    }
+  );
+
+const { inactiveTools, toolStatus, ...settings } = toolSet.inferTools({ toolSetContext: { isAuthenticated: true, plan: 'free' } });
+// inactiveTools: ['cancel_order']
+// toolStatus.cancel_order: { active: false, rule: 'activateWhen', dynamic: true, reason: 'Not available on the free plan. The user can upgrade to Pro.' }
+
 const unavailable = inactiveTools
   .filter((name) => toolStatus[name].reason)
   .map((name) => `- ${name}: ${toolStatus[name].reason}`);
@@ -263,23 +282,21 @@ const result = await generateText({
 
 The model does not get the `cancel_order` tool, but it can tell the user why, and that an upgrade makes it available. In a multi-step run, do the same in `prepareStep()` to update the instructions for each step.
 
-`inactiveTools` is the complement of `activeTools`: the inactive tool names in insertion order. `toolStatus` has an entry for each tool:
+> [!NOTE]
+> `inactiveTools` and `toolStatus` are not AI SDK options. When you spread the whole result into `generateText()` or `streamText()`, the AI SDK ignores them.
+
+`inactiveTools` is the complement of `activeTools`: the inactive tool names in insertion order.
+
+`toolStatus` has an entry for each tool:
 
 - `active`: the same result as `activeTools`.
 - `rule`: the method of the entry that decided the state, or `'default'` when the tool has no entry.
 - `dynamic`: `true` when a predicate decides the state (`.activateWhen()` or `.deactivateWhen()`), so the state can change in a later call or step. Use it to tell the model that a tool is "not available now" and not "not available".
 - `reason`: the reason of that entry, if it has one.
 
-```typescript
-const { toolStatus } = toolSet.inferTools({ toolSetContext: { plan: 'free' } });
-
-toolStatus.search; // { active: true, rule: 'default', dynamic: false }
-toolStatus.cancel_order; // { active: false, rule: 'activateWhen', dynamic: true, reason: 'Cancelling orders is not available on the free plan. ...' }
-```
-
 The reason follows the last-call wins rule: it comes from the last entry of the tool. For `.activateWhen()` and `.deactivateWhen()`, the reason describes the condition, and `active` shows whether the predicate matched. The predicates run once, and `activeTools`, `inactiveTools` and `toolStatus` share the result.
 
-`inactiveTools` and `toolStatus` are not AI SDK options. When you spread the whole result into `generateText()` or `streamText()`, the AI SDK ignores them.
+Because only the last entry counts, two `.activateWhen()` or `.deactivateWhen()` calls for the same tool do not combine. To check several conditions, use one predicate and return `{ active, reason }` in place of a boolean, so that the reason tells which condition failed. The reason of the object wins over the reason of the options. When the predicate returns a boolean, the reason of the options is used.
 
 ### Tool Approval
 
@@ -696,7 +713,7 @@ toolSet.deactivate(['search', 'list_orders'], { reason: 'Read-only mode' });
 
 #### `.activateWhen(name, predicate, options?)` / `.activateWhen(predicates, options?)`
 
-Conditionally activate tools. The predicate receives `{ messages, steps, toolSetContext }` and returns `true` to activate. All fields can be `undefined` if not provided to `inferTools`. Returning `undefined` is treated as `false`.
+Conditionally activate tools. The predicate receives `{ messages, steps, toolSetContext }` and returns `true` to activate. All fields can be `undefined` if not provided to `inferTools`. Returning `undefined` is treated as `false`. The predicate can also return an [`ActivationResult`](#activationresult) `{ active, reason? }`, which states the tool status and the reason directly.
 
 - `options.reason` (optional), the condition of the tools, returned in `toolStatus`. In the record form, the reason applies to all tools in the record. See [Activation Reasons](#activation-reasons).
 
@@ -714,7 +731,7 @@ toolSet.activateWhen(
 
 #### `.deactivateWhen(name, predicate, options?)` / `.deactivateWhen(predicates, options?)`
 
-Conditionally deactivate tools. The predicate receives `{ messages, steps, toolSetContext }` and returns `true` to deactivate. All fields can be `undefined` if not provided to `inferTools`. Returning `undefined` is treated as `false` (tool stays active).
+Conditionally deactivate tools. The predicate receives `{ messages, steps, toolSetContext }` and returns `true` to deactivate. All fields can be `undefined` if not provided to `inferTools`. Returning `undefined` is treated as `false` (tool stays active). The predicate can also return an [`ActivationResult`](#activationresult) `{ active, reason? }`. It is not inverted: `{ active: false }` deactivates the tool.
 
 - `options.reason` (optional), the condition of the tools, returned in `toolStatus`. See [Activation Reasons](#activation-reasons).
 
@@ -1005,6 +1022,19 @@ import type { ToolStatus } from 'ai-tool-set';
 //   active: boolean;
 //   rule: 'default' | 'activate' | 'deactivate' | 'activateWhen' | 'deactivateWhen';
 //   dynamic: boolean;
+//   reason?: string;
+// }
+```
+
+### `ActivationResult`
+
+What an activation predicate can return in place of a boolean. It states the tool status directly, in `.activateWhen()` and in `.deactivateWhen()`. Its `reason` wins over the reason of the activation options. See [Activation Reasons](#activation-reasons):
+
+```ts
+import type { ActivationResult } from 'ai-tool-set';
+
+// {
+//   active: boolean;
 //   reason?: string;
 // }
 ```
